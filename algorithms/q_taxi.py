@@ -34,6 +34,13 @@ class QLearning:
                  decay_rate=0.001,
                  max_eps=1.0,
                  min_eps=0.001):
+        self.epsilon = epsilon
+        self.decay_rate = decay_rate
+        self.max_eps = max_eps
+        self.min_eps = min_eps
+        self.gamma = gamma
+        self.lr = lr
+
         self.init_env(env)
 
     def init_env(self, env_name):
@@ -93,8 +100,8 @@ class QLearning:
                 f'Episode: {episode}'
             print(display)
 
-            for state in range(max_steps):
-                env.render()
+            for step in range(max_steps):
+                self.env.render()
                 action = np.argmax(self.q_table[state, :])
 
                 new_state, reward, done, _ = self.env.step(action)
@@ -106,4 +113,4 @@ class QLearning:
                     break
                 state = new_state
         self.env.close()
-        print(f'\nReward :', {np.sum(rewards) / episodes})
+        print(f'\nReward :', np.sum(rewards) / episodes)
