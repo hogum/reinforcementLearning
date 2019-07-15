@@ -6,12 +6,9 @@ from skimage import transform
 import vizdoom as vz
 
 from collections import deque
+from dataclasses import dataclass, field
 import time
 import os
-
-#from Ipython.display import HTML
-
-# HTML('<iframe>width="560" height="315" src="" frameborder="0" allow="autoplay; encrypted media" allowfullscreen > </iframe >')
 
 
 def create_env():
@@ -19,13 +16,14 @@ def create_env():
         Sets up the game environment
     """
     scenarios = '/usr/local/lib/python3.7/dist-packages/vizdoom/scenarios/'
-
+    global GAME
     doom = vz.DoomGame()
     doom.load_config(os.path.join(scenarios, 'basic.cfg'))  # Config
     doom.set_doom_scenario_path(os.path.join(
         scenarios, 'basic.wad'))  # Scenario
 
-    return initalize_game(doom)
+    GAME = doom
+    return initalize_game(GAME)
 
 
 def initalize_game(game):
@@ -95,7 +93,83 @@ def stack_frames(stacked_frames, state, new_episode=False):
 
     if new_episode:
         stacked_frames.append(frame)
+        stacked_frames.append(frame)
+        stacked_frames.append(frame)
+        stacked_frames.append(frame)
 
+        stack = np.stack(stacked_frames, axis=2)
+    else:
+        stacked_frames.append(frame)
+        stack = np.stack(stacked_frames, axis=2)
+    return stack, stacked_frames
+
+
+def get_state_size():
+    """
+        Returns the default shape for the stack input shape
+
+        Input stack (width, height, channel)
+    """
+    return [84, 84, 4]
+
+
+@dataclass
+class DoomDqNet:
+    """
+        Deep Q Network model for doom.
+
+        Parameters
+        ----------
+        lr: float
+            Learning rate
+        gamma: float
+            Discounting factor for future rewards
+        eps: float
+            Explore-exploit tradeoff for agent actions
+        min_eps: float
+            Minimum value for epsilon
+        max_eps: float
+            Maxumum value for epsilon
+        name: str, default = 'DoomDqNet'
+            Variable for tf namescope
+        state_size: list, default = [84, 84, 4]
+            Shape of input stack
+    """
+    lr: int = 0.0002
+    gamma: float = 0.95
+    eps: float = 0.0001
+    min_eps: float = 0.01
+    max_eps: float = 1.0
+    memory_size: int = 1000000
+    name: str = 'DoomDQN'
+    state_size: list = field(default_factory=get_state_size)
+    # Left, Right, Shoot
+    action_size = field(default_factory=GAME.get_available_buttons_size())
+
+    def __post_init__(self):
+        self.build_model()
+
+    def build_model(self):
+        """
+            Creates the neural net model
+        """
+        with tf.variable_scope(self.name):
+            self.inputs = tf.placeholder(
+                tf.float32, [None, *self.state_size], name='inputs')
+            self.actions = tf.placeholder(
+                tf.float32, [None, 3], name='agent_actions')
+
+            # target_Q:= R(s, a) + yQ^(s', a')
+            self.target_Q = tf.placeholder(tf.float32, [None], name='target')
+            self.build_convnet()
+
+    def build_convnet(self):
+        """
+            Builds the model convolution networks
+        """
+
+
+GAME = None
 
 if __name__ == '__main__':
     test_game()
