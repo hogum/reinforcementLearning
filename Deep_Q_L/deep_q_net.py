@@ -162,11 +162,94 @@ class DoomDqNet:
             # target_Q:= R(s, a) + yQ^(s', a')
             self.target_Q = tf.placeholder(tf.float32, [None], name='target')
             self.build_convnet()
+            tf.reset_default_graph()
 
     def build_convnet(self):
         """
             Builds the model convolution networks
         """
+        self.conv_one = tf.keras.layers.conv2d(
+            inputs=self.inputs,
+            filters=32,
+            kernel_size=[8, 8],
+            strides=[4, 4],
+            padding='valid',
+            kernel_initializer=tf.keras.layers.
+                    xavier_initializer_conv2d(), name='conv_one'
+        )
+        self.conv_one_batchnorm = self._batch_normalize(
+            self.conv_one, name='batch_norm_one')
+        self.conv_one_out = self._activate(
+            conv_one_batchnorm, 'conv1 out')  # [20, 20, 32]
+
+        self.conv_two = tf.keras.conv2d(inputs=self.conv_one_out,
+                                        kernel_size=[4, 4],
+                                        filters=64,
+                                        strides=[2, 2],
+                                        padding='valid',
+                                        kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+                                        name='conv_two'
+                                        )
+        self.conv_two_batchnorm = self._batch_normalize(
+            self.conv_two, 'batch_norm_two')
+        self.conv_two_out = self._activate(
+            conv_two_batchnorm, 'conv2 out')  # -> [9, 9, 4]
+
+        self.conv_three = tf.keras.layers.conv2d(
+            inputs=self.conv_two_out,
+            filters=128,
+            kernel_size=[4, 4, ]
+            strides=[2, 2],
+            padding='valid',
+            kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+            name='conv_three'
+        )
+        self.conv_three_batchnorm = self._batch_normalize(
+            self.conv_three, 'batch_norm_three')
+        self.conv_three_out = self._activate(
+            self.conv_three_batchnorm, 'conv3 out')
+
+        flatten = tf.keras.layers.flatten(self.conv_three_out)
+        self.fc = tf.keras.layers.dense(inputs=flatten,
+                                        units=512,
+                                        activation=tf.nn.elu,
+                                        kernel_initializer=tf.contrib.layers.xavier_initializer(),
+                                        name='fc_one'
+                                        )
+        self.output = tf.keras.layers.dense(
+            inputs=self.fc,
+            units=3,
+            activation=None
+        )
+
+        self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
+        self.loss = tf.reduce_mean(tf.square(self.target_Q, -self.Q))
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
+            .minimize(loss=self.loss)
+
+    def _activate(self, layer, name=None):
+        """
+            Passes the layer through ELU activation function
+        """
+        return tf.nn.elu(layer, name=name)
+
+    def _batch_normalize(self, layer, name=None):
+        """
+            Creates a batch normalization layer using input
+            as the layer parameter
+        """
+        batch_layer = tf.keras.layers.BatchNormalization(
+            epsilon=1e-5, name=name)
+
+        return batch_layer(inputs=layer, training=True
+                           )
+
+
+def main():
+    """
+        Runs the DQN model
+    """
+    clf = DoomDqNet()
 
 
 GAME = None
