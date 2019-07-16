@@ -7,26 +7,33 @@ import vizdoom as vz
 
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Any
+
 import time
 import os
 
 
-def create_env():
+def create_env(game_state_only=False, actions_only=False):
     """
         Sets up the game environment
     """
     scenarios = '/usr/local/lib/python3.7/dist-packages/vizdoom/scenarios/'
-    global GAME
+    # global GAME
     doom = vz.DoomGame()
     doom.load_config(os.path.join(scenarios, 'basic.cfg'))  # Config
     doom.set_doom_scenario_path(os.path.join(
         scenarios, 'basic.wad'))  # Scenario
 
     GAME = doom
-    return initalize_game(GAME)
+    if game_state_only:
+        return GAME
+    return initialize_game(GAME, actions_only)
 
 
-def initalize_game(game):
+GAME = create_env(game_state_only=True)
+
+
+def initialize_game(game, actions_only=False):
     """
         Starts the game environment with the set of
         possible actions
@@ -37,7 +44,8 @@ def initalize_game(game):
         [0, 1, 0],
         [0, 0, 1]
     ])
-    return game, actions
+
+    return game, actions if not actions_only else actions
 
 
 def test_game():
@@ -52,7 +60,6 @@ def test_game():
 
         while not game.is_episode_finished():
             state = game.get_state()
-            state.screen_buffer
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
             print(action)
             reward = game.make_action(action)
@@ -80,18 +87,19 @@ def preprocess_frame(frame):
     return resized_frame
 
 
-def stack_frames(stacked_frames, state, new_episode=False):
+def stack_frames(state, stacked_frames=None, new_episode=False):
     """
         Creates a deque stack of four frames
         removing the oldest each time a new  frame is
         appended
     """
     stack_size = 4
-    stacked_frames = deque([np.zeros((84, 84), dtype=np.int)
-                            for _ in range(stack_size)], maxlen=4)
+    stacked_frames_ = deque([np.zeros((84, 84), dtype=np.int)
+                             for _ in range(stack_size)], maxlen=4)
     frame = preprocess_frame(state)
 
     if new_episode:
+        stacked_frames = stacked_frames_[:]
         stacked_frames.append(frame)
         stacked_frames.append(frame)
         stacked_frames.append(frame)
@@ -144,7 +152,7 @@ class DoomDqNet:
     name: str = 'DoomDQN'
     state_size: list = field(default_factory=get_state_size)
     # Left, Right, Shoot
-    action_size = field(default_factory=GAME.get_available_buttons_size())
+    action_size: Any = field(default_factory=GAME.get_available_buttons_size())
 
     def __post_init__(self):
         self.build_model()
@@ -168,64 +176,66 @@ class DoomDqNet:
         """
             Builds the model convolution networks
         """
-        self.conv_one = tf.keras.layers.conv2d(
+        conv_one = tf.contrib.layers.conv2d(
             inputs=self.inputs,
             filters=32,
             kernel_size=[8, 8],
             strides=[4, 4],
             padding='valid',
-            kernel_initializer=tf.keras.layers.
+            kernel_initializer=tf.contrib.layers.
                     xavier_initializer_conv2d(), name='conv_one'
         )
-        self.conv_one_batchnorm = self._batch_normalize(
-            self.conv_one, name='batch_norm_one')
-        self.conv_one_out = self._activate(
+        conv_one_batchnorm = self._batch_normalize(
+            conv_one, name='batch_norm_one')
+        conv_one_out = self._activate(
             conv_one_batchnorm, 'conv1 out')  # [20, 20, 32]
 
-        self.conv_two = tf.keras.conv2d(inputs=self.conv_one_out,
-                                        kernel_size=[4, 4],
-                                        filters=64,
-                                        strides=[2, 2],
-                                        padding='valid',
-                                        kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
-                                        name='conv_two'
-                                        )
-        self.conv_two_batchnorm = self._batch_normalize(
-            self.conv_two, 'batch_norm_two')
-        self.conv_two_out = self._activate(
+        conv_two = tf.contrib.conv2d(
+            inputs=conv_one_out,
+            kernel_size=[4, 4],
+            filters=64,
+            strides=[2, 2],
+            padding='valid',
+            kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+            name='conv_two'
+        )
+        conv_two_batchnorm = self._batch_normalize(
+            conv_two, 'batch_norm_two')
+        conv_two_out = self._activate(
             conv_two_batchnorm, 'conv2 out')  # -> [9, 9, 4]
 
-        self.conv_three = tf.keras.layers.conv2d(
-            inputs=self.conv_two_out,
+        conv_three = tf.contrib.layers.conv2d(
+            inputs=conv_two_out,
             filters=128,
-            kernel_size=[4, 4, ]
+            kernel_size=[4, 4],
             strides=[2, 2],
             padding='valid',
             kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
             name='conv_three'
         )
-        self.conv_three_batchnorm = self._batch_normalize(
-            self.conv_three, 'batch_norm_three')
-        self.conv_three_out = self._activate(
-            self.conv_three_batchnorm, 'conv3 out')
+        conv_three_batchnorm = self._batch_normalize(
+            conv_three, 'batch_norm_three')
+        conv_three_out = self._activate(
+            conv_three_batchnorm, 'conv3 out')
 
-        flatten = tf.keras.layers.flatten(self.conv_three_out)
-        self.fc = tf.keras.layers.dense(inputs=flatten,
-                                        units=512,
-                                        activation=tf.nn.elu,
-                                        kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                                        name='fc_one'
-                                        )
-        self.output = tf.keras.layers.dense(
-            inputs=self.fc,
+        flatten = tf.contrib.layers.flatten(conv_three_out)
+        fc = tf.contrib.layers.dense(
+            inputs=flatten,
+            units=512,
+            activation=tf.nn.elu,
+            kernel_initializer=tf.contrib.layers.xavier_initializer(),
+            name='fc_one'
+        )
+        output = tf.contrib.layers.dense(
+            inputs=fc,
             units=3,
             activation=None
         )
 
-        self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
-        self.loss = tf.reduce_mean(tf.square(self.target_Q, -self.Q))
+        Q = tf.reduce_sum(tf.multiply(output, actions), axis=1)
+        loss = tf.reduce_mean(tf.square(self.target_Q, -self.Q))
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
-            .minimize(loss=self.loss)
+            .minimize(loss=loss)
 
     def _activate(self, layer, name=None):
         """
@@ -244,15 +254,73 @@ class DoomDqNet:
         return batch_layer(inputs=layer, training=True
                            )
 
+    def prepopulate_memory(self, episodes=64):
+        """
+            Takes states and actions, appending experince to memory
+        """
+
+        memory = Memory(max_size=4)
+        actions = create_env(actions_only=True)
+        game = GAME.new_episode()  # Render game
+
+        #  First step
+        state = game.get_state().screen_buffer
+        state, stacked_frames = stack_frames(state, new_episode=True)
+
+        for _ in range(episodes):
+            action = actions[np.random.choice(actions.shape[0], size=1)][0]
+            reward = game.make_action(action)
+            done = game.is_episode_finished()
+
+            if done:  # Dead
+                next_state = np.zeros(state.shape)
+                memory + [state, action, reward, next_state, done]
+                game.new_episode()
+                state = game.get_state().screen_buffer
+                state, stacked_frames = stack_frames(state, new_episode=True)
+            else:
+                next_state = game.get_state().screen_buffer
+                next_state, stacked_frames = stack_frames(
+                    next_state, stacked_frames)
+                memory + [state, action, reward, next_state, done]
+                state = next_state
+
+
+class Memory:
+    """
+        Controls Replay by adding experiences to deque
+
+        Parameters
+        ----------
+        max_size: int
+            Number of elements to hold in memory
+    """
+
+    def __init__(self, max_size=4):
+        self.buffer = deque(maxlen=max_size)
+
+    def __add__(self, exp):
+        self.buffer.append(exp)
+
+    def sample(self, batch_size):
+        """
+            Samples a stack of random experiences from the memory
+        """
+        memory_size = len(self.buffer)
+
+        idxs = np.random.choice(np.arange(memory_size),
+                                replace=False,
+                                size=batch_size)
+        return (self.buffer[idx] for idx in idxs)
+
 
 def main():
     """
         Runs the DQN model
     """
+    create_env()
     clf = DoomDqNet()
 
-
-GAME = None
 
 if __name__ == '__main__':
     test_game()
