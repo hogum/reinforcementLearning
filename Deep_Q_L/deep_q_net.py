@@ -12,6 +12,8 @@ from typing import Any
 import time
 import os
 
+from .memory import Memory
+
 
 def create_env(game_state_only=False, actions_only=False):
     """
@@ -59,7 +61,7 @@ def test_game():
         game.new_episode()
 
         while not game.is_episode_finished():
-            state = game.get_state()
+            # state = game.get_state()
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
             print(action)
             reward = game.make_action(action)
@@ -156,6 +158,7 @@ class DoomDqNet:
 
     def __post_init__(self):
         self.build_model()
+        self.memory = Memory(max_size=4)
 
     def build_model(self):
         """
@@ -182,8 +185,8 @@ class DoomDqNet:
             kernel_size=[8, 8],
             strides=[4, 4],
             padding='valid',
-            kernel_initializer=tf.contrib.layers.
-                    xavier_initializer_conv2d(), name='conv_one'
+            kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
+            name='conv_one'
         )
         conv_one_batchnorm = self._batch_normalize(
             conv_one, name='batch_norm_one')
@@ -197,10 +200,9 @@ class DoomDqNet:
             strides=[2, 2],
             padding='valid',
             kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
-            name='conv_two'
-        )
-        conv_two_batchnorm = self._batch_normalize(
-            conv_two, 'batch_norm_two')
+            name='conv_two')
+
+        conv_two_batchnorm = self._batch_normalize(conv_two, 'batch_norm_two')
         conv_two_out = self._activate(
             conv_two_batchnorm, 'conv2 out')  # -> [9, 9, 4]
 
@@ -232,10 +234,10 @@ class DoomDqNet:
             activation=None
         )
 
-        Q = tf.reduce_sum(tf.multiply(output, actions), axis=1)
-        loss = tf.reduce_mean(tf.square(self.target_Q, -self.Q))
+        self.Q = tf.reduce_sum(tf.multiply(output, self.actions), axis=1)
+        self.loss = tf.reduce_mean(tf.square(self.target_Q, - self.Q))
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
-            .minimize(loss=loss)
+            .minimize(loss=self.loss)
 
     def _activate(self, layer, name=None):
         """
@@ -259,59 +261,148 @@ class DoomDqNet:
             Takes states and actions, appending experince to memory
         """
 
-        memory = Memory(max_size=4)
         actions = create_env(actions_only=True)
-        game = GAME.new_episode()  # Render game
+        self.possible_actions = actions
+        self.game = GAME.new_episode()  # Render game
 
         #  First step
-        state = game.get_state().screen_buffer
+        state = self.game.get_state().screen_buffer
         state, stacked_frames = stack_frames(state, new_episode=True)
 
         for _ in range(episodes):
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
-            reward = game.make_action(action)
-            done = game.is_episode_finished()
+            reward = self.game.make_action(action)
+            done = self.game.is_episode_finished()
 
             if done:  # Dead
                 next_state = np.zeros(state.shape)
-                memory + [state, action, reward, next_state, done]
-                game.new_episode()
-                state = game.get_state().screen_buffer
+                self.memory + [state, action, reward, next_state, done]
+                self.game.new_episode()
+                state = self.game.get_state().screen_buffer
                 state, stacked_frames = stack_frames(state, new_episode=True)
             else:
-                next_state = game.get_state().screen_buffer
+                next_state = self.game.get_state().screen_buffer
                 next_state, stacked_frames = stack_frames(
                     next_state, stacked_frames)
-                memory + [state, action, reward, next_state, done]
+                self.memory + [state, action, reward, next_state, done]
                 state = next_state
 
-
-class Memory:
-    """
-        Controls Replay by adding experiences to deque
-
-        Parameters
-        ----------
-        max_size: int
-            Number of elements to hold in memory
-    """
-
-    def __init__(self, max_size=4):
-        self.buffer = deque(maxlen=max_size)
-
-    def __add__(self, exp):
-        self.buffer.append(exp)
-
-    def sample(self, batch_size):
+    def train(self, episodes=500, max_steps=100, batch_size=64, training=True):
         """
-            Samples a stack of random experiences from the memory
+            Trains the agent: Runs episodes, collecting states,
+            actions, rewards and saving as experiences to memory
         """
-        memory_size = len(self.buffer)
+        saver = tf.train.Saver()
 
-        idxs = np.random.choice(np.arange(memory_size),
-                                replace=False,
-                                size=batch_size)
-        return (self.buffer[idx] for idx in idxs)
+        if training:
+            with tf.Session() as sess:
+                sess.run(tf, global_variables_initializer())
+                decay_step = 0
+                self.game.init()
+
+                for episode in range(episodes):
+                    step = 0
+                    episode_rewards = []
+
+                    # Make new episode and observe first state
+                    self.game.new_episode()
+                    state = self.game.get_state().screen_buffer
+                    state, stacked_frames = stack_frames(
+                        state, new_episode=True)
+
+                    while step is not max_steps:
+                        step += 1
+                        decay_step += 1
+
+                        # Predict action and take
+                        action, explore_prob = self.predict_action(
+                            state, decay_step)
+                        reward = self.game.make_action(action)
+                        episode_rewards.append(reward)
+
+                        done = self.game.is_episode_finished()
+
+                        if done:
+                            next_state = np.zeros([84, 84], dtype=np.int)
+                            next_state, stacked_frames = stack_frames(
+                                next_state, stacked_frames)
+                            # End episode
+                            step = max_steps
+                            total_reward = np.sum(episode_rewards)
+                            self.memory + [state, action,
+                                           reward, next_state, done]
+                            print(f'Episode - {episode}, ' +
+                                  f' Total reward - {total_reward}, ' +
+                                  f'Training loss - {loss}, ' +
+                                  f'Explore Prob - {explore_prob}'
+                                  )
+                        else:
+                            next_state = self.game.get_state().screen_buffer
+                            next_state, stacked_frames = stack_frames(
+                                next_state, stacked_frames)
+                            self.memory + [state, action,
+                                           reward, next_state, done]
+                            state = next_state
+                        mini_batches = self._get_mini_batch(batch_size)
+
+    def _get_mini_batch(self, batch_s):
+        """
+            Returns a mini batch of experiences stored in
+            memory
+        """
+        batch = self.memory.sample(batch_s)
+        states_m_batch = self._sample_from_memory(batch, idx=0, min_dims=3)
+        actions_m_batch = self._sample_from_memory(batch, idx=1)
+        rewards_m_batch = self._sample_from_memory(batch, idx=2)
+        next_state_m_batch = self._sample_from_memory(batch, idx=3, min_dims=3)
+        done_m_batch = self._sample_from_memory(batch, idx=4)
+
+        return {'states': states_m_batch,
+                'actions': actions_m_batch,
+                'rewards': rewards_m_batch,
+                'next_states': next_state_m_batch,
+                'dones': done_m_batch
+                }
+
+    def _sample_from_memory(self, batch, idx, min_dims=0):
+        """
+            Gives states, actions, rewards, as mini
+            batches from a memory sample
+        """
+        return np.array([mini_b[idx] for mini_b in batch], ndmin=min_dims)
+
+    def predict_action(self, state, decay_step):
+        """
+            Predicts the next action for the agent.
+
+            Uses the value of epsilon to select a random value
+            or action at argmax(Q[s, a])
+        """
+        explore_exploit_tradeoff = np.random.uniform()
+        explore_prob = self.min_eps + \
+            (self.max_eps - self.min_eps) * np.exp(-self.exp, decay_step)
+
+        if explore_prob > explore_exploit_tradeoff:
+            # Explore
+            action = self.possible_actions[np.random.choice(
+                self.possible_actions.shape[0], size=1)][0]
+        else:
+            # Exploit -> Estimate Q values state
+            Qs = sess.run(self.output, feed_dict={
+                          self.inputs: state.reshape((1, *state.shape))})
+            # Best action
+            choice = np.argmax(Qs)
+            action = self.possible_actions[int(choice)]
+        return action, explore_prob
+
+
+def setup_tf_writer():
+    """
+        Sets up tensorboard writer
+    """
+    writer = tf.summary.FileWriter("/root/tensorboard/dqn/1")
+    tf.summary.scalar('Loss', DoomDqNet.loss)
+    write_op = tf.summary.merge_all()
 
 
 def main():
@@ -319,6 +410,7 @@ def main():
         Runs the DQN model
     """
     create_env()
+    setup_tf_writer()
     clf = DoomDqNet()
 
 
