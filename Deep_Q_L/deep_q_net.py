@@ -1,16 +1,21 @@
+"""
+    This module contains a Deep Q Network model for Doom
+    game
+"""
+
+import time
+import os
+
+from collections import deque
+from dataclasses import dataclass, field
+from typing import Any
+
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage import transform
 
 import vizdoom as vz
-
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Any
-
-import time
-import os
 
 from .memory import Memory
 
@@ -288,7 +293,8 @@ class DoomDqNet:
                 self.memory + [state, action, reward, next_state, done]
                 state = next_state
 
-    def train(self, episodes=500, max_steps=100, batch_size=64, training=True):
+    def train(self, episodes=500, max_steps=100, batch_size=64,
+              save_interval=5, training=True):
         """
             Trains the agent: Runs episodes, collecting states,
             actions, rewards and saving as experiences to memory
@@ -298,6 +304,7 @@ class DoomDqNet:
             with tf.Session() as sess:
                 sess.run(tf.global_variables_initializer())
                 decay_step = 0
+                loss = ''
                 self.game.init()
 
                 for episode in range(episodes):
@@ -316,7 +323,9 @@ class DoomDqNet:
 
                         # Predict action and take
                         action, explore_prob = self.predict_action(
-                            state, decay_step)
+                            sess,
+                            state,
+                            decay_step)
                         reward = self.game.make_action(action)
                         episode_rewards.append(reward)
 
@@ -354,10 +363,11 @@ class DoomDqNet:
                                     'next_states')
                             })
                         self.target_Qs_batch = self.get_target_Qs(mini_batches)
-                        loss = self.find_loss(mini_batches)
-                        self.write_summaries(episode, mini_batches)
+                        loss = self.find_loss(sess, mini_batches)
+                        self.write_summaries(sess, episode, mini_batches)
+                        self.save(sess, episode, interval=save_interval)
 
-    def write_summaries(self, episode, mini_batches):
+    def write_summaries(self, sess,  episode, mini_batches):
         """
             Flushes TF summaries
         """
@@ -371,7 +381,7 @@ class DoomDqNet:
         self.writer.add_summary(summary, episode)
         self.writer.flush()
 
-    def save(self, episode, interval):
+    def save(self, sess, episode, interval):
         """
             Saves the model at a given interval
         """
@@ -381,7 +391,7 @@ class DoomDqNet:
             save_path = saver.save(sess, '.models/doom.ckpt')
         print(f'Model saved\t{save_path}')
 
-    def find_loss(self, mini_batches):
+    def find_loss(self, sess, mini_batches):
         """
             Finds the training loss
         """
@@ -446,7 +456,7 @@ class DoomDqNet:
         """
         return np.array([mini_b[idx] for mini_b in batch], ndmin=min_dims)
 
-    def predict_action(self, state, decay_step):
+    def predict_action(self, sess, state, decay_step):
         """
             Predicts the next action for the agent.
 
