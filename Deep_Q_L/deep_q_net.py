@@ -159,6 +159,7 @@ class DoomDqNet:
     def __post_init__(self):
         self.build_model()
         self.memory = Memory(max_size=4)
+        self.setup_tf_writer()
 
     def build_model(self):
         """
@@ -228,13 +229,13 @@ class DoomDqNet:
             kernel_initializer=tf.contrib.layers.xavier_initializer(),
             name='fc_one'
         )
-        output = tf.contrib.layers.dense(
+        self.output = tf.contrib.layers.dense(
             inputs=fc,
             units=3,
             activation=None
         )
 
-        self.Q = tf.reduce_sum(tf.multiply(output, self.actions), axis=1)
+        self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
         self.loss = tf.reduce_mean(tf.square(self.target_Q, - self.Q))
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
             .minimize(loss=self.loss)
@@ -292,11 +293,10 @@ class DoomDqNet:
             Trains the agent: Runs episodes, collecting states,
             actions, rewards and saving as experiences to memory
         """
-        saver = tf.train.Saver()
 
         if training:
             with tf.Session() as sess:
-                sess.run(tf, global_variables_initializer())
+                sess.run(tf.global_variables_initializer())
                 decay_step = 0
                 self.game.init()
 
@@ -343,7 +343,80 @@ class DoomDqNet:
                             self.memory + [state, action,
                                            reward, next_state, done]
                             state = next_state
+
                         mini_batches = self._get_mini_batch(batch_size)
+
+                        # Get Qs for next state
+                        self.Qs_next_state = sess.run(
+                            self.output,
+                            feed_dict={
+                                self.inputs: mini_batches.get(
+                                    'next_states')
+                            })
+                        self.target_Qs_batch = self.get_target_Qs(mini_batches)
+                        loss = self.find_loss(mini_batches)
+                        self.write_summaries(episode, mini_batches)
+
+    def write_summaries(self, episode, mini_batches):
+        """
+            Flushes TF summaries
+        """
+        summary = sess.run(self.write_op,
+                           feed_dict={
+                               self.inputs: mini_batches.get('states'),
+                               self.target_Q: 'k',
+                               self.actions: mini_batches.get('actions')
+                           }
+                           )
+        self.writer.add_summary(summary, episode)
+        self.writer.flush()
+
+    def save(self, episode, interval):
+        """
+            Saves the model at a given interval
+        """
+        saver = tf.train.Saver()
+
+        if not episode % interval:
+            save_path = saver.save(sess, '.models/doom.ckpt')
+        print(f'Model saved\t{save_path}')
+
+    def find_loss(self, mini_batches):
+        """
+            Finds the training loss
+        """
+        target_mini_batch = np.array(
+            [m_batch for m_batch in self.target_Qs_batch])
+        loss, _ = sess.run(
+            [self.loss, self.optimizer],
+            feed_dict={
+                self.inputs: mini_batches.get('states'),
+                self.target_Q: target_mini_batch,
+                self.actions: mini_batches.get('actions')
+            })
+        return loss
+
+    def get_target_Qs(self, mini_batches):
+        """
+             Set Qs_tg = r if episode ends at s+1 else
+             Qs_tg = r + y*max(Q[s', a'])
+
+        """
+        target_Qs_batch = []
+        batch_len = mini_batches.get('batch_len')
+
+        for i in range(batch_len):
+            terminal = mini_batches.get('dones')[i]
+
+            if terminal:
+                # Terminal state only equals reward
+                target_Qs_batch.append(mini_batches.get('rewards')[i])
+            else:
+                target_ = mini_batches.get(
+                    'rewards')[0] * np.max(self.Qs_next_state[i])
+                target_Qs_batch.append(target_)
+
+        return target_Qs_batch
 
     def _get_mini_batch(self, batch_s):
         """
@@ -354,14 +427,16 @@ class DoomDqNet:
         states_m_batch = self._sample_from_memory(batch, idx=0, min_dims=3)
         actions_m_batch = self._sample_from_memory(batch, idx=1)
         rewards_m_batch = self._sample_from_memory(batch, idx=2)
-        next_state_m_batch = self._sample_from_memory(batch, idx=3, min_dims=3)
+        next_state_m_batch = self._sample_from_memory(
+            batch, idx=3, min_dims=3)
         done_m_batch = self._sample_from_memory(batch, idx=4)
 
         return {'states': states_m_batch,
                 'actions': actions_m_batch,
                 'rewards': rewards_m_batch,
                 'next_states': next_state_m_batch,
-                'dones': done_m_batch
+                'dones': done_m_batch,
+                'batch_len': len(batch)
                 }
 
     def _sample_from_memory(self, batch, idx, min_dims=0):
@@ -380,7 +455,7 @@ class DoomDqNet:
         """
         explore_exploit_tradeoff = np.random.uniform()
         explore_prob = self.min_eps + \
-            (self.max_eps - self.min_eps) * np.exp(-self.exp, decay_step)
+            (self.max_eps - self.min_eps) * np.exp(-self.eps, decay_step)
 
         if explore_prob > explore_exploit_tradeoff:
             # Explore
@@ -388,21 +463,22 @@ class DoomDqNet:
                 self.possible_actions.shape[0], size=1)][0]
         else:
             # Exploit -> Estimate Q values state
-            Qs = sess.run(self.output, feed_dict={
-                          self.inputs: state.reshape((1, *state.shape))})
+            Qs = sess.run(
+                self.output,
+                feed_dict={
+                    self.inputs: state.reshape((1, *state.shape))})
             # Best action
             choice = np.argmax(Qs)
             action = self.possible_actions[int(choice)]
         return action, explore_prob
 
-
-def setup_tf_writer():
-    """
-        Sets up tensorboard writer
-    """
-    writer = tf.summary.FileWriter("/root/tensorboard/dqn/1")
-    tf.summary.scalar('Loss', DoomDqNet.loss)
-    write_op = tf.summary.merge_all()
+    def setup_tf_writer(self):
+        """
+            Sets up tensorboard writer
+        """
+        self.writer = tf.summary.FileWriter("/root/tensorboard/dqn/1")
+        tf.summary.scalar('Loss', self.loss)
+        self.write_op = tf.summary.merge_all()
 
 
 def main():
@@ -410,7 +486,6 @@ def main():
         Runs the DQN model
     """
     create_env()
-    setup_tf_writer()
     clf = DoomDqNet()
 
 
