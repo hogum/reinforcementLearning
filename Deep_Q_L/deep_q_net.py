@@ -19,7 +19,10 @@ import vizdoom as vz
 from memory import Memory
 
 
-def create_env(game_state_only=False, actions_only=False):
+SAVE_PATH = '/home/mugoh/'
+
+
+def create_env(game_state_only=False, actions_only=False, render_screen=False):
     """
         Sets up the game environment
     """
@@ -32,14 +35,17 @@ def create_env(game_state_only=False, actions_only=False):
 
     if game_state_only:
         return doom
-    return initialize_game(doom, actions_only)
+    return initialize_game(doom,  render_screen, actions_only=actions_only)
 
 
-def initialize_game(game, actions_only=False):
+def initialize_game(game, show_screen, actions_only=False):
     """
         Starts the game environment with the set of
         possible actions
     """
+    if not show_screen:
+        game.set_window_visible(False)
+
     game.init()
     actions = np.array([
         [1, 0, 0],
@@ -279,6 +285,7 @@ class DoomDqNet:
 
         self.game, actions = create_env()
         self.possible_actions = actions
+        self.game.set_window_visible(False)
         self.game.new_episode()  # Render game
 
         #  First step
@@ -497,7 +504,8 @@ class DoomDqNet:
         """
             Sets up tensorboard writer
         """
-        self.writer = tf.summary.FileWriter("/root/tensorboard/dqn/1")
+        self.writer = tf.summary.FileWriter(
+            os.path.join(SAVE_PATH, "tensorboard/dqn/1"))
         tf.summary.scalar('Loss', self.loss)
         self.write_op = tf.summary.merge_all()
 
@@ -537,11 +545,9 @@ def main():
     """
         Runs the DQN model
     """
-    create_env()
+    create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
     clf.prepopulate_memory(episodes=64)
-    clf.train(episodes=500, max_steps=100)
-    clf.play(episodes=25)
 
 
 if __name__ == '__main__':
