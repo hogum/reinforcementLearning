@@ -22,8 +22,7 @@ class Memory:
             Samples a stack of random experiences from the memory
         """
         memory_size = len(self.buffer)
-
         idxs = np.random.choice(np.arange(memory_size),
-                                replace=False,
-                                size=batch_size)
+                                size=batch_size,
+                                replace=False)
         return (self.buffer[idx] for idx in idxs)

@@ -291,11 +291,13 @@ class DoomDqNet:
         #  First step
         state = self.game.get_state().screen_buffer
         state, stacked_frames = stack_frames(state, new_episode=True)
+        print('\n\t==========Memorizing Experiences=========\n')
 
-        for _ in range(episodes):
+        for episode in range(episodes):
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
             reward = self.game.make_action(list(action))
             done = self.game.is_episode_finished()
+            print(f'{episode}  action - {action}\treward - {reward}')
 
             if done:  # Dead
                 next_state = np.zeros(state.shape)
@@ -310,8 +312,9 @@ class DoomDqNet:
                 self.memory + [state, action, reward, next_state, done]
                 state = next_state
         self.stacked_frames = stacked_frames
+        self.train()
 
-    def train(self, episodes=500, max_steps=100, batch_size=64,
+    def train(self, episodes=500, max_steps=100, batch_size=4,
               save_interval=5, training=True):
         """
             Trains the agent: Runs episodes, collecting states,
@@ -431,9 +434,9 @@ class DoomDqNet:
 
         """
         target_Qs_batch = []
-        batch_len = mini_batches.get('batch_len')
+        batch_ = mini_batches.get('batch')
 
-        for i in range(batch_len):
+        for i in range(0, len(batch_)):
             terminal = mini_batches.get('dones')[i]
 
             if terminal:
@@ -469,7 +472,7 @@ class DoomDqNet:
                 'rewards': rewards_m_batch,
                 'next_states': next_state_m_batch,
                 'dones': done_m_batch,
-                'batch_len': len(batch)
+                'batch': batch
                 }
 
     def _sample_from_memory(self, batch, idx, min_dims=0):
@@ -488,7 +491,7 @@ class DoomDqNet:
         """
         explore_exploit_tradeoff = np.random.uniform()
         explore_prob = self.min_eps + \
-            (self.max_eps - self.min_eps) * np.exp(-self.eps, decay_step)
+            (self.max_eps - self.min_eps) * np.exp(-self.eps * decay_step)
 
         if explore_prob > explore_exploit_tradeoff:
             # Explore
@@ -552,7 +555,7 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=64)
+    clf.prepopulate_memory(episodes=6)
 
 
 if __name__ == '__main__':
