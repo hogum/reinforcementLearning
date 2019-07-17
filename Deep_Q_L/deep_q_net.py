@@ -12,12 +12,11 @@ from typing import Any
 
 import tensorflow as tf
 import numpy as np
-import matplotlib.pyplot as plt
 from skimage import transform
 
 import vizdoom as vz
 
-from .memory import Memory
+from memory import Memory
 
 
 def create_env(game_state_only=False, actions_only=False):
@@ -31,13 +30,9 @@ def create_env(game_state_only=False, actions_only=False):
     doom.set_doom_scenario_path(os.path.join(
         scenarios, 'basic.wad'))  # Scenario
 
-    GAME = doom
     if game_state_only:
-        return GAME
-    return initialize_game(GAME, actions_only)
-
-
-GAME = create_env(game_state_only=True)
+        return doom
+    return initialize_game(doom, actions_only)
 
 
 def initialize_game(game, actions_only=False):
@@ -69,7 +64,7 @@ def test_game():
             # state = game.get_state()
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
             print(action)
-            reward = game.make_action(action)
+            reward = game.make_action(list(action))
             print(f'action: {action}\treward: {reward}')
             time.sleep(.03)
         print('Total Reward: ', game.get_total_reward())
@@ -87,7 +82,7 @@ def preprocess_frame(frame):
     # x = np.mean(frame, -1)
 
     # Crop screen above roof
-    cropped_frame = frame[30: -10, 30: -10]
+    cropped_frame = frame[:, 30: -30]
     normalized_frame = cropped_frame / 255
     resized_frame = transform.resize(normalized_frame, [84, 84])
 
@@ -101,12 +96,12 @@ def stack_frames(state, stacked_frames=None, new_episode=False):
         appended
     """
     stack_size = 4
-    stacked_frames_ = deque([np.zeros((84, 84), dtype=np.int)
-                             for _ in range(stack_size)], maxlen=4)
     frame = preprocess_frame(state)
 
     if new_episode:
-        stacked_frames = stacked_frames_[:]
+        stacked_frames = deque([np.zeros((84, 84), dtype=np.int)
+                                for _ in range(stack_size)], maxlen=4)
+
         stacked_frames.append(frame)
         stacked_frames.append(frame)
         stacked_frames.append(frame)
@@ -119,6 +114,16 @@ def stack_frames(state, stacked_frames=None, new_episode=False):
     return stack, stacked_frames
 
 
+def get_empty_stack():
+    """
+        Creates an empty deque for frames
+    """
+    stack_size = 4
+
+    return deque([np.zeros((84, 84), dtype=np.int)
+                  for _ in range(stack_size)], maxlen=4)
+
+
 def get_state_size():
     """
         Returns the default shape for the stack input shape
@@ -126,6 +131,9 @@ def get_state_size():
         Input stack (width, height, channel)
     """
     return [84, 84, 4]
+
+
+GAME = create_env(game_state_only=True)
 
 
 @dataclass
@@ -159,17 +167,18 @@ class DoomDqNet:
     name: str = 'DoomDQN'
     state_size: list = field(default_factory=get_state_size)
     # Left, Right, Shoot
-    action_size: Any = field(default_factory=GAME.get_available_buttons_size())
+    action_size: Any = field(default_factory=GAME.get_available_buttons_size)
 
     def __post_init__(self):
         self.build_model()
-        self.memory = Memory(max_size=4)
         self.setup_tf_writer()
 
     def build_model(self):
         """
             Creates the neural net model
         """
+        self.memory = Memory(max_size=self.memory_size)
+
         with tf.variable_scope(self.name):
             self.inputs = tf.placeholder(
                 tf.float32, [None, *self.state_size], name='inputs')
@@ -179,13 +188,13 @@ class DoomDqNet:
             # target_Q:= R(s, a) + yQ^(s', a')
             self.target_Q = tf.placeholder(tf.float32, [None], name='target')
             self.build_convnet()
-            tf.reset_default_graph()
+        tf.reset_default_graph()
 
     def build_convnet(self):
         """
             Builds the model convolution networks
         """
-        conv_one = tf.contrib.layers.conv2d(
+        conv_one = tf.layers.conv2d(
             inputs=self.inputs,
             filters=32,
             kernel_size=[8, 8],
@@ -197,9 +206,9 @@ class DoomDqNet:
         conv_one_batchnorm = self._batch_normalize(
             conv_one, name='batch_norm_one')
         conv_one_out = self._activate(
-            conv_one_batchnorm, 'conv1 out')  # [20, 20, 32]
+            conv_one_batchnorm, 'conv1_out')  # [20, 20, 32]
 
-        conv_two = tf.contrib.conv2d(
+        conv_two = tf.layers.conv2d(
             inputs=conv_one_out,
             kernel_size=[4, 4],
             filters=64,
@@ -210,9 +219,9 @@ class DoomDqNet:
 
         conv_two_batchnorm = self._batch_normalize(conv_two, 'batch_norm_two')
         conv_two_out = self._activate(
-            conv_two_batchnorm, 'conv2 out')  # -> [9, 9, 4]
+            conv_two_batchnorm, 'conv2_out')  # -> [9, 9, 4]
 
-        conv_three = tf.contrib.layers.conv2d(
+        conv_three = tf.layers.conv2d(
             inputs=conv_two_out,
             filters=128,
             kernel_size=[4, 4],
@@ -224,24 +233,25 @@ class DoomDqNet:
         conv_three_batchnorm = self._batch_normalize(
             conv_three, 'batch_norm_three')
         conv_three_out = self._activate(
-            conv_three_batchnorm, 'conv3 out')
+            conv_three_batchnorm, 'conv3_out')
 
-        flatten = tf.contrib.layers.flatten(conv_three_out)
-        fc = tf.contrib.layers.dense(
+        flatten = tf.layers.flatten(conv_three_out)
+        fc = tf.layers.dense(
             inputs=flatten,
             units=512,
             activation=tf.nn.elu,
             kernel_initializer=tf.contrib.layers.xavier_initializer(),
             name='fc_one'
         )
-        self.output = tf.contrib.layers.dense(
+        self.output = tf.layers.dense(
             inputs=fc,
             units=3,
-            activation=None
+            activation=None,
+            kernel_initializer=tf.contrib.layers.xavier_initializer()
         )
 
         self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
-        self.loss = tf.reduce_mean(tf.square(self.target_Q, - self.Q))
+        self.loss = tf.reduce_mean(tf.square(self.target_Q - self.Q))
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
             .minimize(loss=self.loss)
 
@@ -264,12 +274,12 @@ class DoomDqNet:
 
     def prepopulate_memory(self, episodes=64):
         """
-            Takes states and actions, appending experince to memory
+            Takes states and actions, appending experience to memory
         """
 
-        actions = create_env(actions_only=True)
+        self.game, actions = create_env()
         self.possible_actions = actions
-        self.game = GAME.new_episode()  # Render game
+        self.game.new_episode()  # Render game
 
         #  First step
         state = self.game.get_state().screen_buffer
@@ -277,7 +287,7 @@ class DoomDqNet:
 
         for _ in range(episodes):
             action = actions[np.random.choice(actions.shape[0], size=1)][0]
-            reward = self.game.make_action(action)
+            reward = self.game.make_action(list(action))
             done = self.game.is_episode_finished()
 
             if done:  # Dead
@@ -292,6 +302,7 @@ class DoomDqNet:
                     next_state, stacked_frames)
                 self.memory + [state, action, reward, next_state, done]
                 state = next_state
+        self.stacked_frames = stacked_frames
 
     def train(self, episodes=500, max_steps=100, batch_size=64,
               save_interval=5, training=True):
@@ -385,10 +396,10 @@ class DoomDqNet:
         """
             Saves the model at a given interval
         """
-        saver = tf.train.Saver()
+        self.saver = tf.train.Saver()
 
         if not episode % interval:
-            save_path = saver.save(sess, '.models/doom.ckpt')
+            save_path = self.saver.save(sess, '.models/doom.ckpt')
         print(f'Model saved\t{save_path}')
 
     def find_loss(self, sess, mini_batches):
@@ -480,7 +491,7 @@ class DoomDqNet:
             # Best action
             choice = np.argmax(Qs)
             action = self.possible_actions[int(choice)]
-        return action, explore_prob
+        return list(action), explore_prob
 
     def setup_tf_writer(self):
         """
@@ -490,6 +501,37 @@ class DoomDqNet:
         tf.summary.scalar('Loss', self.loss)
         self.write_op = tf.summary.merge_all()
 
+    def play(self, episodes=25):
+        """
+            Play with trained agent
+        """
+        with tf.Session as sess:
+            self.saver.restore(sess, '.models/doom.cpkt')
+            self.game.init()
+            total_reward = 0
+
+            for _ in range(episodes):
+                self.game.new_episode()
+                while not self.game.is_episode_finished():
+                    frame = self.game.get_state().screen_buffer
+                    state, self.stacked_frames = stack_frames(
+                        frame, self.stacked_frames)
+
+                    # Largest Q value
+                    Q_s = sess.run(self.output,
+                                   feed_dict={
+                                       self.inputs: state.reshape(
+                                           [1, *state.shape])
+                                   })
+                    action = np.argmax(Q_s)
+                    action = self.possible_actions[int(action)]
+                    self.game.make_action(action)
+                    reward = self.game.get_total_reward()
+                print(f'score: {reward}')
+                total_reward += reward
+            print(f'Total reward: {total_reward/100}')
+            self.game.close()
+
 
 def main():
     """
@@ -497,7 +539,10 @@ def main():
     """
     create_env()
     clf = DoomDqNet()
+    clf.prepopulate_memory(episodes=64)
+    clf.train(episodes=500, max_steps=100)
+    clf.play(episodes=25)
 
 
 if __name__ == '__main__':
-    test_game()
+    main()
