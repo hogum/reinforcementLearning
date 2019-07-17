@@ -445,12 +445,17 @@ class DoomDqNet:
             memory
         """
         batch = self.memory.sample(batch_s)
-        states_m_batch = self._sample_from_memory(batch, idx=0, min_dims=3)
-        actions_m_batch = self._sample_from_memory(batch, idx=1)
-        rewards_m_batch = self._sample_from_memory(batch, idx=2)
-        next_state_m_batch = self._sample_from_memory(
-            batch, idx=3, min_dims=3)
-        done_m_batch = self._sample_from_memory(batch, idx=4)
+        states_m_batch = np.array([each[0] for each in batch], ndmin=3)
+        # self._sample_from_memory(batch, idx=0, min_dims=3)
+        actions_m_batch = np.array([each[1] for each in batch])
+        # self._sample_from_memory(batch, idx=1)
+        rewards_m_batch = np.array([each[2] for each in batch])
+        # self._sample_from_memory(batch, idx=2)
+        next_state_m_batch = np.array([each[3] for each in batch], ndmin=3)
+        # self._sample_from_memory(
+        #    batch, idx=3, min_dims=3)
+        done_m_batch = np.array([each[4] for each in batch])
+        # self._sample_from_memory(batch, idx=4)
 
         return {'states': states_m_batch,
                 'actions': actions_m_batch,
