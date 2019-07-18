@@ -91,6 +91,7 @@ def preprocess_frame(frame):
     cropped_frame = frame[:, 30: -30]
     normalized_frame = cropped_frame / 255
     resized_frame = transform.resize(normalized_frame, [84, 84])
+    stacked_frames.append(frame)
 
     return resized_frame
 
@@ -108,10 +109,8 @@ def stack_frames(state, stacked_frames=None, new_episode=False):
         stacked_frames = deque([np.zeros((84, 84), dtype=np.int)
                                 for _ in range(stack_size)], maxlen=4)
 
-        stacked_frames.append(frame)
-        stacked_frames.append(frame)
-        stacked_frames.append(frame)
-        stacked_frames.append(frame)
+        for _ in range(stack_size):
+            stacked_frames.append(frame)
 
         stack = np.stack(stacked_frames, axis=2)
     else:
@@ -170,7 +169,7 @@ class DoomDqNet:
     min_eps: float = 0.01
     max_eps: float = 1.0
     memory_size: int = 1000000
-    name: str = 'DoomDQN'
+    name: str = 'DoomDQNet'
     state_size: list = field(default_factory=get_state_size)
     # Left, Right, Shoot
     action_size: Any = field(default_factory=GAME.get_available_buttons_size)
@@ -194,7 +193,6 @@ class DoomDqNet:
             # target_Q:= R(s, a) + yQ^(s', a')
             self.target_Q = tf.placeholder(tf.float32, [None], name='target')
             self.build_convnet()
-        tf.reset_default_graph()
 
     def build_convnet(self):
         """
@@ -225,7 +223,7 @@ class DoomDqNet:
 
         conv_two_batchnorm = self._batch_normalize(conv_two, 'batch_norm_two')
         conv_two_out = self._activate(
-            conv_two_batchnorm, 'conv2_out')  # -> [9, 9, 4]
+            conv_two_batchnorm, 'conv2_out')  # -> [9, 9, 64]
 
         conv_three = tf.layers.conv2d(
             inputs=conv_two_out,
@@ -312,9 +310,8 @@ class DoomDqNet:
                 self.memory + [state, action, reward, next_state, done]
                 state = next_state
         self.stacked_frames = stacked_frames
-        self.train()
 
-    def train(self, episodes=500, max_steps=100, batch_size=4,
+    def train(self, episodes=500, max_steps=100, batch_size=64,
               save_interval=5, training=True):
         """
             Trains the agent: Runs episodes, collecting states,
@@ -338,7 +335,7 @@ class DoomDqNet:
                     state, stacked_frames = stack_frames(
                         state, new_episode=True)
 
-                    while step is not max_steps:
+                    while step < max_steps:
                         step += 1
                         decay_step += 1
 
@@ -375,7 +372,6 @@ class DoomDqNet:
                             state = next_state
 
                         mini_batches = self._get_mini_batch(batch_size)
-
                         # Get Qs for next state
                         self.Qs_next_state = sess.run(
                             self.output,
@@ -455,32 +451,29 @@ class DoomDqNet:
             memory
         """
         batch = self.memory.sample(batch_s)
-        states_m_batch = np.array([each[0] for each in batch], ndmin=3)
-        # self._sample_from_memory(batch, idx=0, min_dims=3)
-        actions_m_batch = np.array([each[1] for each in batch])
-        # self._sample_from_memory(batch, idx=1)
-        rewards_m_batch = np.array([each[2] for each in batch])
-        # self._sample_from_memory(batch, idx=2)
-        next_state_m_batch = np.array([each[3] for each in batch], ndmin=3)
-        # self._sample_from_memory(
-        #    batch, idx=3, min_dims=3)
-        done_m_batch = np.array([each[4] for each in batch])
-        # self._sample_from_memory(batch, idx=4)
+        states_m_batch = self.__from_memory(batch, key='states', min_dims=3)
+        actions_m_batch = self.__from_memory(batch, key='actions')
+        rewards_m_batch = self.__from_memory(batch, key='rewards')
+        next_state_m_batch = self.__from_memory(
+            batch, key='next_states', min_dims=3)
+        done_m_batch = self.__from_memory(batch, key='dones')
 
-        return {'states': states_m_batch,
+        return {'states':  np.resize(states_m_batch, (batch_s, 84, 84, 4)),
                 'actions': actions_m_batch,
                 'rewards': rewards_m_batch,
-                'next_states': next_state_m_batch,
+                'next_states': np.resize(next_state_m_batch,
+                                         (batch_s, 84, 84, 4)),
                 'dones': done_m_batch,
                 'batch': batch
                 }
 
-    def _sample_from_memory(self, batch, idx, min_dims=0):
+    def __from_memory(self, batch, key, min_dims=0):
         """
             Gives states, actions, rewards, as mini
             batches from a memory sample
         """
-        return np.array([mini_b[idx] for mini_b in batch], ndmin=min_dims)
+        m_b = np.array((batch.get(key)), ndmin=min_dims)
+        return m_b
 
     def predict_action(self, sess, state, decay_step):
         """
@@ -521,7 +514,7 @@ class DoomDqNet:
         """
             Play with trained agent
         """
-        with tf.Session as sess:
+        with tf.Session() as sess:
             self.saver.restore(sess, '.models/doom.cpkt')
             self.game.init()
             total_reward = 0
@@ -555,7 +548,8 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=6)
+    clf.prepopulate_memory(episodes=16)
+    clf.train(episodes=100, batch_size=16)
 
 
 if __name__ == '__main__':
