@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 
+
 class Memory:
     """
         Controls Replay by adding experiences to deque
@@ -12,17 +13,40 @@ class Memory:
     """
 
     def __init__(self, max_size=4):
-        self.buffer = deque(maxlen=max_size)
+        self.experiences = ['states', 'actions',
+                            'rewards', 'next_states',
+                            'dones']
+        self.buffer_len = 0
+        self.buffer = {
+            "states": deque(maxlen=max_size),
+            "actions": deque(maxlen=max_size),
+            "rewards": deque(maxlen=max_size),
+            "next_states": deque(maxlen=max_size),
+            "dones": deque(maxlen=max_size)
+        }
 
     def __add__(self, exp):
-        self.buffer.append(exp)
 
-    def sample(self, batch_size):
+        for experience in self.experiences:
+            self.buffer.get(experience).append(
+                exp[self.experiences.index(experience)]
+            )
+        self.buffer_len += 1
+
+    def sample(self, batch_size, replace=False):
         """
             Samples a stack of random experiences from the memory
         """
-        memory_size = len(self.buffer)
-        idxs = np.random.choice(np.arange(memory_size),
+        mini_batches = {}
+        idxs = np.random.choice(np.arange(self.buffer_len),
                                 size=batch_size,
-                                replace=False)
-        return (self.buffer[idx] for idx in idxs)
+                                replace=replace)
+        for experience in self.experiences:
+            mini_batches.update(
+                {
+                    experience: [
+                        self.buffer.get(experience)[idx] for idx in idxs
+                    ]
+                })
+
+        return mini_batches
