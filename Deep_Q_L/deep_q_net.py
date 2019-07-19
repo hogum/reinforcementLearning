@@ -91,7 +91,6 @@ def preprocess_frame(frame):
     cropped_frame = frame[:, 30: -30]
     normalized_frame = cropped_frame / 255
     resized_frame = transform.resize(normalized_frame, [84, 84])
-    stacked_frames.append(frame)
 
     return resized_frame
 
@@ -184,10 +183,10 @@ class DoomDqNet:
         """
         self.memory = Memory(max_size=self.memory_size)
 
-        with tf.variable_scope(self.name):
-            self.inputs = tf.placeholder(
+        with tf.compat.v1.variable_scope(self.name):
+            self.inputs = tf.compat.v1.placeholder(
                 tf.float32, [None, *self.state_size], name='inputs')
-            self.actions = tf.placeholder(
+            self.actions = tf.compat.v1.placeholder(
                 tf.float32, [None, 3], name='agent_actions')
 
             # target_Q:= R(s, a) + yQ^(s', a')
@@ -256,7 +255,7 @@ class DoomDqNet:
 
         self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
         self.loss = tf.reduce_mean(tf.square(self.target_Q - self.Q))
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) \
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.lr) \
             .minimize(loss=self.loss)
 
     def _activate(self, layer, name=None):
@@ -320,7 +319,7 @@ class DoomDqNet:
 
         if training:
             with tf.Session() as sess:
-                sess.run(tf.global_variables_initializer())
+                sess.run(tf.compat.v1.global_variables_initializer())
                 decay_step = 0
                 loss = ''
                 self.game.init()
@@ -430,9 +429,8 @@ class DoomDqNet:
 
         """
         target_Qs_batch = []
-        batch_ = mini_batches.get('batch')
-
-        for i in range(0, len(batch_)):
+        batch_ = mini_batches.get('batch_len') - 1  # For index
+        for i in range(0, batch_):
             terminal = mini_batches.get('dones')[i]
 
             if terminal:
@@ -440,7 +438,7 @@ class DoomDqNet:
                 target_Qs_batch.append(mini_batches.get('rewards')[i])
             else:
                 target_ = mini_batches.get(
-                    'rewards')[0] * np.max(self.Qs_next_state[i])
+                    'rewards')[i] + self.gamma * np.max(self.Qs_next_state[i])
                 target_Qs_batch.append(target_)
 
         return target_Qs_batch
@@ -450,7 +448,7 @@ class DoomDqNet:
             Returns a mini batch of experiences stored in
             memory
         """
-        batch = self.memory.sample(batch_s)
+        batch, batch_len = self.memory.sample(batch_s)
         states_m_batch = self.__from_memory(batch, key='states', min_dims=3)
         actions_m_batch = self.__from_memory(batch, key='actions')
         rewards_m_batch = self.__from_memory(batch, key='rewards')
@@ -464,7 +462,7 @@ class DoomDqNet:
                 'next_states': np.resize(next_state_m_batch,
                                          (batch_s, 84, 84, 4)),
                 'dones': done_m_batch,
-                'batch': batch
+                'batch_len': batch_len
                 }
 
     def __from_memory(self, batch, key, min_dims=0):
@@ -505,10 +503,10 @@ class DoomDqNet:
         """
             Sets up tensorboard writer
         """
-        self.writer = tf.summary.FileWriter(
+        self.writer = tf.compat.v1.summary.FileWriter(
             os.path.join(SAVE_PATH, "tensorboard/dqn/1"))
-        tf.summary.scalar('Loss', self.loss)
-        self.write_op = tf.summary.merge_all()
+        tf.compat.v1.summary.scalar('Loss', self.loss)
+        self.write_op = tf.compat.v1.summary.merge_all()
 
     def play(self, episodes=25):
         """

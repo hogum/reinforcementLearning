@@ -49,4 +49,4 @@ class Memory:
                     ]
                 })
 
-        return mini_batches
+        return mini_batches, self.buffer_len
