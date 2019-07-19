@@ -3,7 +3,6 @@
     game
 """
 
-import time
 import os
 
 from collections import deque
@@ -12,132 +11,14 @@ from typing import Any
 
 import tensorflow as tf
 import numpy as np
-from skimage import transform
-
-import vizdoom as vz
 
 from memory import Memory
+from stack_controls import create_env, stack_frames, get_state_size, GAME
 
 
 SAVE_PATH = '/home/mugoh/'
-
-
-def create_env(game_state_only=False, actions_only=False, render_screen=False):
-    """
-        Sets up the game environment
-    """
-    scenarios = '/usr/local/lib/python3.7/dist-packages/vizdoom/scenarios/'
-    # global GAME
-    doom = vz.DoomGame()
-    doom.load_config(os.path.join(scenarios, 'basic.cfg'))  # Config
-    doom.set_doom_scenario_path(os.path.join(
-        scenarios, 'basic.wad'))  # Scenario
-
-    if game_state_only:
-        return doom
-    return initialize_game(doom,  render_screen, actions_only=actions_only)
-
-
-def initialize_game(game, show_screen, actions_only=False):
-    """
-        Starts the game environment with the set of
-        possible actions
-    """
-    if not show_screen:
-        game.set_window_visible(False)
-
-    game.init()
-    actions = np.array([
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ])
-
-    return game, actions if not actions_only else actions
-
-
-def test_game():
-    """
-        Test environment  with random action
-    """
-    episodes = 25
-    game, actions = create_env()
-
-    for _ in range(episodes):
-        game.new_episode()
-
-        while not game.is_episode_finished():
-            # state = game.get_state()
-            action = actions[np.random.choice(actions.shape[0], size=1)][0]
-            print(action)
-            reward = game.make_action(list(action))
-            print(f'action: {action}\treward: {reward}')
-            time.sleep(.03)
-        print('Total Reward: ', game.get_total_reward())
-        time.sleep(3)
-    game.close()
-
-
-def preprocess_frame(frame):
-    """
-        Crops the screen, normalizes pixel values
-        and  resizes the frame for reduced computation
-        time
-    """
-    # Grayscale frame
-    # x = np.mean(frame, -1)
-
-    # Crop screen above roof
-    cropped_frame = frame  # frame[:, 30: -30]
-    normalized_frame = cropped_frame / 255
-    resized_frame = transform.resize(normalized_frame, [84, 84])
-
-    return resized_frame
-
-
-def stack_frames(state, stacked_frames=None, new_episode=False):
-    """
-        Creates a deque stack of four frames
-        removing the oldest each time a new  frame is
-        appended
-    """
-    stack_size = 4
-    frame = preprocess_frame(state)
-
-    if new_episode:
-        stacked_frames = deque([np.zeros((84, 84), dtype=np.int)
-                                for _ in range(stack_size)], maxlen=4)
-
-        for _ in range(stack_size):
-            stacked_frames.append(frame)
-
-        stack = np.stack(stacked_frames, axis=2)
-    else:
-        stacked_frames.append(frame)
-        stack = np.stack(stacked_frames, axis=2)
-    return stack, stacked_frames
-
-
-def get_empty_stack():
-    """
-        Creates an empty deque for frames
-    """
-    stack_size = 4
-
-    return deque([np.zeros((84, 84), dtype=np.int)
-                  for _ in range(stack_size)], maxlen=4)
-
-
-def get_state_size():
-    """
-        Returns the default shape for the stack input shape
-
-        Input stack (width, height, channel)
-    """
-    return [84, 84, 4]
-
-
-GAME = create_env(game_state_only=True)
+STACKED_FRAMES = deque([np.zeros((84, 84), dtype=np.int)
+                        for _ in range(4)], maxlen=4)
 
 
 @dataclass
@@ -256,7 +137,8 @@ class DoomDqNet:
 
         self.Q = tf.reduce_sum(tf.multiply(self.output, self.actions), axis=1)
         self.loss = tf.reduce_mean(tf.square(self.target_Q - self.Q))
-        self.optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=self.lr) \
+        self.optimizer = tf.compat.v1.train.AdamOptimizer(
+            learning_rate=self.lr) \
             .minimize(loss=self.loss)
 
     def _activate(self, layer, name=None):
@@ -281,6 +163,7 @@ class DoomDqNet:
             Takes states and actions, appending experience to memory
         """
 
+        global STACKED_FRAMES
         self.game, actions = create_env()
         self.possible_actions = actions
         self.game.set_window_visible(False)
@@ -310,6 +193,7 @@ class DoomDqNet:
                 self.memory + [state, action, reward, next_state, done]
                 state = next_state
         self.stacked_frames = stacked_frames
+        STACKED_FRAMES = self.stacked_frames
 
     def train(self, episodes=500, max_steps=100, batch_size=64,
               save_interval=5, training=True):
@@ -350,7 +234,9 @@ class DoomDqNet:
                         done = self.game.is_episode_finished()
 
                         if done:
-                            next_state = np.zeros([84, 84], dtype=np.int)
+                            next_state = np.zeros(
+                                (84, 84, state.shape[-1]),
+                                dtype=np.int)
                             next_state, stacked_frames = stack_frames(
                                 next_state, stacked_frames)
                             # End episode
@@ -405,7 +291,7 @@ class DoomDqNet:
 
         if not episode % interval:
             save_path = self.saver.save(sess, '.models/doom.ckpt')
-        print(f'Model saved\t{save_path}')
+            print(f'Model saved\t{save_path}')
 
     def find_loss(self, sess, mini_batches):
         """
@@ -435,13 +321,13 @@ class DoomDqNet:
             try:
                 terminal = mini_batches.get('dones')[i]
 
+                current_rewards = mini_batches.get('rewards')[i]
                 if terminal:
                     # Terminal state only equals reward
-                    target_Qs_batch.append(mini_batches.get('rewards')[i])
+                    target_Qs_batch.append(current_rewards)
                 else:
-                    target_ = mini_batches.get(
-                        'rewards')[i] + \
-                        self.gamma * np.max(self.Qs_next_state[i])
+                    target_ = current_rewards + self.gamma * \
+                        np.max(self.Qs_next_state[i])
                     target_Qs_batch.append(target_)
             except IndexError:
                 continue
@@ -522,6 +408,9 @@ class DoomDqNet:
         """
         with tf.compat.v1.Session() as sess:
             self.saver.restore(sess, '.models/doom.ckpt')
+            if not hasattr(self, 'game'):
+                self.game, possible_actions = create_env()
+
             self.game.set_window_visible(False)
             self.game.init()
             total_reward = 0
@@ -530,18 +419,20 @@ class DoomDqNet:
                 self.game.new_episode()
                 while not self.game.is_episode_finished():
                     frame = self.game.get_state().screen_buffer
-                    state, self.stacked_frames = stack_frames(
-                        frame, self.stacked_frames)
-
+                    state, stacked_frames = stack_frames(
+                        frame, STACKED_FRAMES)
                     # Largest Q value
-                    Q_s = sess.run(self.output,
-                                   feed_dict={
-                                       self.inputs: state.reshape(
-                                           [1, *state.shape])
-                                   })
+                    Q_s = sess.run(
+                        self.output,
+                        feed_dict={
+                            self.inputs: np.resize(state,
+                                                   (1, *state.shape[:-1]))
+                            # state.reshape(
+                            #    [1, *state.shape])
+                        })
                     action = np.argmax(Q_s)
-                    action = self.possible_actions[int(action)]
-                    self.game.make_action(action)
+                    action = possible_actions[int(action)]
+                    self.game.make_action(list(action))
                     reward = self.game.get_total_reward()
                 print(f'score: {reward}')
                 total_reward += reward
@@ -555,9 +446,9 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=4)
-    clf.train(episodes=4, batch_size=4)
-    clf.play()
+    clf.prepopulate_memory(episodes=8)
+    clf.train(episodes=64, batch_size=8, max_steps=100)
+    clf.play(episodes=25)
 
 
 if __name__ == '__main__':
