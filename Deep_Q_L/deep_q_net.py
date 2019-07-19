@@ -88,7 +88,7 @@ def preprocess_frame(frame):
     # x = np.mean(frame, -1)
 
     # Crop screen above roof
-    cropped_frame = frame[:, 30: -30]
+    cropped_frame = frame  # frame[:, 30: -30]
     normalized_frame = cropped_frame / 255
     resized_frame = transform.resize(normalized_frame, [84, 84])
 
@@ -190,7 +190,8 @@ class DoomDqNet:
                 tf.float32, [None, 3], name='agent_actions')
 
             # target_Q:= R(s, a) + yQ^(s', a')
-            self.target_Q = tf.placeholder(tf.float32, [None], name='target')
+            self.target_Q = tf.compat.v1.placeholder(
+                tf.float32, [None], name='target')
             self.build_convnet()
 
     def build_convnet(self):
@@ -318,7 +319,7 @@ class DoomDqNet:
         """
 
         if training:
-            with tf.Session() as sess:
+            with tf.compat.v1.Session() as sess:
                 sess.run(tf.compat.v1.global_variables_initializer())
                 decay_step = 0
                 loss = ''
@@ -390,7 +391,7 @@ class DoomDqNet:
         summary = sess.run(self.write_op,
                            feed_dict={
                                self.inputs: mini_batches.get('states'),
-                               self.target_Q: 'k',
+                               self.target_Q: self.target_Qs_batch,
                                self.actions: mini_batches.get('actions')
                            }
                            )
@@ -401,7 +402,6 @@ class DoomDqNet:
         """
             Saves the model at a given interval
         """
-        self.saver = tf.train.Saver()
 
         if not episode % interval:
             save_path = self.saver.save(sess, '.models/doom.ckpt')
@@ -430,16 +430,21 @@ class DoomDqNet:
         """
         target_Qs_batch = []
         batch_ = mini_batches.get('batch_len') - 1  # For index
-        for i in range(0, batch_):
-            terminal = mini_batches.get('dones')[i]
 
-            if terminal:
-                # Terminal state only equals reward
-                target_Qs_batch.append(mini_batches.get('rewards')[i])
-            else:
-                target_ = mini_batches.get(
-                    'rewards')[i] + self.gamma * np.max(self.Qs_next_state[i])
-                target_Qs_batch.append(target_)
+        for i in range(batch_):
+            try:
+                terminal = mini_batches.get('dones')[i]
+
+                if terminal:
+                    # Terminal state only equals reward
+                    target_Qs_batch.append(mini_batches.get('rewards')[i])
+                else:
+                    target_ = mini_batches.get(
+                        'rewards')[i] + \
+                        self.gamma * np.max(self.Qs_next_state[i])
+                    target_Qs_batch.append(target_)
+            except IndexError:
+                continue
 
         return target_Qs_batch
 
@@ -456,7 +461,8 @@ class DoomDqNet:
             batch, key='next_states', min_dims=3)
         done_m_batch = self.__from_memory(batch, key='dones')
 
-        return {'states':  np.resize(states_m_batch, (batch_s, 84, 84, 4)),
+        return {'states':  np.resize(states_m_batch,
+                                     (batch_s, 84, 84, 4)),
                 'actions': actions_m_batch,
                 'rewards': rewards_m_batch,
                 'next_states': np.resize(next_state_m_batch,
@@ -493,7 +499,7 @@ class DoomDqNet:
             Qs = sess.run(
                 self.output,
                 feed_dict={
-                    self.inputs: state.reshape((1, *state.shape))})
+                    self.inputs: state.reshape((1, *state.shape[1:-1]))})
             # Best action
             choice = np.argmax(Qs)
             action = self.possible_actions[int(choice)]
@@ -505,6 +511,8 @@ class DoomDqNet:
         """
         self.writer = tf.compat.v1.summary.FileWriter(
             os.path.join(SAVE_PATH, "tensorboard/dqn/1"))
+        self.saver = tf.train.Saver()
+
         tf.compat.v1.summary.scalar('Loss', self.loss)
         self.write_op = tf.compat.v1.summary.merge_all()
 
@@ -512,8 +520,9 @@ class DoomDqNet:
         """
             Play with trained agent
         """
-        with tf.Session() as sess:
-            self.saver.restore(sess, '.models/doom.cpkt')
+        with tf.compat.v1.Session() as sess:
+            self.saver.restore(sess, '.models/doom.ckpt')
+            self.game.set_window_visible(False)
             self.game.init()
             total_reward = 0
 
@@ -546,8 +555,9 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=16)
-    clf.train(episodes=100, batch_size=16)
+    clf.prepopulate_memory(episodes=4)
+    clf.train(episodes=4, batch_size=4)
+    clf.play()
 
 
 if __name__ == '__main__':
