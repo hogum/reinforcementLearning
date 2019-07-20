@@ -19,6 +19,8 @@ from stack_controls import create_env, stack_frames, get_state_size, GAME
 SAVE_PATH = '/home/mugoh/'
 STACKED_FRAMES = deque([np.zeros((84, 84), dtype=np.int)
                         for _ in range(4)], maxlen=4)
+MODEL_PATH = '/tmp/.models/doom.ckpt'
+saver = None
 
 
 @dataclass
@@ -235,7 +237,7 @@ class DoomDqNet:
 
                         if done:
                             next_state = np.zeros(
-                                (84, 84, state.shape[-1]),
+                                (84, 84),
                                 dtype=np.int)
                             next_state, stacked_frames = stack_frames(
                                 next_state, stacked_frames)
@@ -290,8 +292,7 @@ class DoomDqNet:
         """
 
         if not episode % interval:
-            save_path = self.saver.save(sess, '.models/doom.ckpt')
-            print(f'Model saved\t{save_path}')
+            self.saver.save(sess, MODEL_PATH)
 
     def find_loss(self, sess, mini_batches):
         """
@@ -347,12 +348,14 @@ class DoomDqNet:
             batch, key='next_states', min_dims=3)
         done_m_batch = self.__from_memory(batch, key='dones')
 
-        return {'states':  np.resize(states_m_batch,
-                                     (batch_s, 84, 84, 4)),
+        return {'states':  states_m_batch,  # np.resize(states_m_batch,
+                # (batch_s, 84, 84, 4))
                 'actions': actions_m_batch,
                 'rewards': rewards_m_batch,
-                'next_states': np.resize(next_state_m_batch,
-                                         (batch_s, 84, 84, 4)),
+                # np.resize(next_state_m_batch,
+                'next_states':  next_state_m_batch,
+
+                #        (batch_s, 84, 84, 4)),
                 'dones': done_m_batch,
                 'batch_len': batch_len
                 }
@@ -385,7 +388,7 @@ class DoomDqNet:
             Qs = sess.run(
                 self.output,
                 feed_dict={
-                    self.inputs: state.reshape((1, *state.shape[1:-1]))})
+                    self.inputs: state.reshape((1, *state.shape))})
             # Best action
             choice = np.argmax(Qs)
             action = self.possible_actions[int(choice)]
@@ -395,9 +398,13 @@ class DoomDqNet:
         """
             Sets up tensorboard writer
         """
+        global saver
+
         self.writer = tf.compat.v1.summary.FileWriter(
             os.path.join(SAVE_PATH, "tensorboard/dqn/1"))
         self.saver = tf.train.Saver()
+        if not saver:
+            saver = self.saver
 
         tf.compat.v1.summary.scalar('Loss', self.loss)
         self.write_op = tf.compat.v1.summary.merge_all()
@@ -407,11 +414,14 @@ class DoomDqNet:
             Play with trained agent
         """
         with tf.compat.v1.Session() as sess:
-            self.saver.restore(sess, '.models/doom.ckpt')
+            saver.restore(sess, MODEL_PATH)
             if not hasattr(self, 'game'):
-                self.game, possible_actions = create_env()
+                print('NO attr\n\n')
+                self.game, possible_actions = create_env(render_screen=True)
+            else:
+                possible_actions = self.possible_actions
 
-            self.game.set_window_visible(False)
+            self.game.set_window_visible(True)
             self.game.init()
             total_reward = 0
 
@@ -426,9 +436,7 @@ class DoomDqNet:
                         self.output,
                         feed_dict={
                             self.inputs: np.resize(state,
-                                                   (1, *state.shape[:-1]))
-                            # state.reshape(
-                            #    [1, *state.shape])
+                                                   (1, *state.shape))
                         })
                     action = np.argmax(Q_s)
                     action = possible_actions[int(action)]
@@ -446,9 +454,9 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=8)
-    clf.train(episodes=64, batch_size=8, max_steps=100)
-    clf.play(episodes=25)
+    clf.prepopulate_memory(episodes=2000)
+    clf.train(episodes=1000, batch_size=64, max_steps=2000)
+    # clf.play(episodes=10)
 
 
 if __name__ == '__main__':

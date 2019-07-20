@@ -80,8 +80,8 @@ def preprocess_frame(frame):
 
     # Crop screen above roof
     cropped_frame = frame  # frame[:, 30: -30]
-    normalized_frame = cropped_frame / 255
-    resized_frame = transform.resize(normalized_frame, [84, 84])
+    normalized_frame = cropped_frame
+    resized_frame = transform.resize(normalized_frame[0], (84, 84))
 
     return resized_frame
 
