@@ -1,6 +1,10 @@
 """
     This module contains a Deep Q Network model for Doom
     game
+
+    - A pretrained model is in the .models directory
+    The MODEL_PATH can be changed to .models/doom.ckpt
+    for play.
 """
 
 import os
@@ -17,9 +21,10 @@ from stack_controls import create_env, stack_frames, get_state_size, GAME
 
 
 SAVE_PATH = '/home/mugoh/'
+MODEL_PATH = '/tmp/.models/doom.ckpt'
+
 STACKED_FRAMES = deque([np.zeros((84, 84), dtype=np.int)
                         for _ in range(4)], maxlen=4)
-MODEL_PATH = '/tmp/.models/doom.ckpt'
 saver = None
 
 
@@ -416,7 +421,6 @@ class DoomDqNet:
         with tf.compat.v1.Session() as sess:
             saver.restore(sess, MODEL_PATH)
             if not hasattr(self, 'game'):
-                print('NO attr\n\n')
                 self.game, possible_actions = create_env(render_screen=True)
             else:
                 possible_actions = self.possible_actions
@@ -454,9 +458,9 @@ def main():
     """
     create_env(render_screen=False)  # NO video on VM
     clf = DoomDqNet()
-    clf.prepopulate_memory(episodes=2000)
-    clf.train(episodes=1000, batch_size=64, max_steps=2000)
-    # clf.play(episodes=10)
+    # clf.prepopulate_memory(episodes=2000)
+    # clf.train(episodes=1000, batch_size=64, max_steps=2000)
+    clf.play(episodes=200)
 
 
 if __name__ == '__main__':

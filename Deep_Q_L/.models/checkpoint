@@ -1,0 +1,2 @@
+model_checkpoint_path: "/tmp/.models/doom.ckpt"
+all_model_checkpoint_paths: "/tmp/.models/doom.ckpt"
