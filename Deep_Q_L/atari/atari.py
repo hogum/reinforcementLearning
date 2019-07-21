@@ -1,6 +1,5 @@
 from collections import deque
 from dataclasses import dataclass, field
-import random
 import os
 
 import tensorflow as tf
@@ -188,15 +187,15 @@ class DoomDqNet:
             random actions
             (state, action, reward, next_state, done)
         """
-        env, env_vars = create_env()
-        state = env.reset()
-        actions_choice, _ = env_vars
+        self.env, env_vars = create_env()
+        state = self.env.reset()
+        self.actions_choice, _ = env_vars
         state, stacked_frames = stack_frames(state, new_episode=True)
 
         for _ in range(episodes):
             choice = np.random.randint(0, self.action_size)
-            action = actions_choice[choice]
-            next_state, reward, done, _ = env.step(action)
+            action = self.actions_choice[choice]
+            next_state, reward, done, _ = self.env.step(action)
 
             next_state, stacked_frames = stack_frames(
                 next_state, stacked_frames)
@@ -218,7 +217,191 @@ class DoomDqNet:
             '/root/tensorboard/dqn/2')
         tf.summary.scalar('Model', self)
         self.writer_op = tf.summary.merge_all()
+        self.saver = tf.train.Saver()
 
+    def predict_action(self, sess, state, decay_step):
+        """
+            Selects a random action for the agent for exploration
+            or the action an max(Q[s', a']) for exploitation
+        """
+        explore_explot_tradeoff = np.random.random()
 
-if __name__ == '__main__':
-    create_env()
+        explore_prob = self.min_eps + \
+            (self.max_eps - self.min_eps) * np.exp(-self.eps * decay_step)
+
+        if explore_prob > explore_explot_tradeoff:
+            choice = np.random.randint(0, self.action_size)
+            action = self.actions_choice[choice]
+        else:
+            Q_s = sess.run(self.output,
+                           feed_dict={
+                               self.inputs: state.reshape(1, *state.shape)}
+                           )
+            choice = np.argmax(Q_s)
+            action = self.actions_choice[choice]
+        return action, explore_prob
+
+    def train(self, episodes=30, batch_size=64,
+              max_steps=50000, training=True):
+        """
+            Trains the agent by prediction of future Qs and
+            minimizing difference between Qs and future Qs [loss].
+        """
+        if training:
+            with tf.compat.v1.Session() as sess:
+                sess.run(tf.global_variables_initializer())
+                decay_step = 0
+                loss = acc = ''
+                final_rewards = []
+
+                for episode in range(episodes):
+                    step = 0
+                    episode_rewards = []
+                    state = self.env.reset()
+                    state, stacked_frames = stack_frames(
+                        state, new_episode=True)
+
+                    while step < max_steps:
+                        step += 1
+                        decay_step += 1
+
+                        action, explore_prob = self.predict_action(
+                            sess, state, decay_step)
+                        next_state, reward, done, _ = self.env.step(action)
+
+                        self.env.render()
+                        episode_rewards.append(reward)
+
+                        if done:
+                            next_state = np.zeros(RESOLUTON, dtype=np.int)
+                            next_state, stacked_frames = stack_frames(
+                                next_state, stacked_frames)
+                            step = max_steps
+                            total_reward = np.sum(episode_rewards)
+                            final_rewards += total_reward
+
+                            print(f'Episode: {episode}  ' +
+                                  f'Total reward: {total_reward}  ' +
+                                  f'Explore Prob: {explore_prob}  ' +
+                                  f'Loss: {loss}  ' +
+                                  f'Accuracy: {acc}')
+                            self.memory + [state, action,
+                                           reward, next_state, done]
+                        else:
+                            next_state, stacked_frames = stack_frames(
+                                next_state, stacked_frames)
+                            self.memory + [state, action,
+                                           reward, next_state, done]
+                            state = next_state
+                        loss, acc = self._learn(sess, episode, batch_size)
+                        self._save(sess, episode)
+
+    def _learn(self, sess, episode, batch_size):
+        """
+            Helps the agent learn from the sampled experiences
+        """
+        mini_batches = self.get_mini_batches(batch_size)
+        target_mini_batch = self.get_q_values(sess, mini_batches)
+        mini_batches.update('targets': target_mini_batch)
+
+        loss, acc = self.find_loss(sess, mini_batches)
+        self.summarize(sess, episode, mini_batches, episode)
+
+        return loss, acc
+
+    def get_mini_batches(self, batch_s):
+        """
+            Obtains random experiences from memory for
+            the agent to learn from
+        """
+
+        batch, batch_len = self.memory.sample(batch_s)
+        states_m_batch = self.__from_memory(
+            batch,
+            key='states',
+            min_dims=3)
+        actions_m_batch = self.__from_memory(batch, key='actions')
+        rewards_m_batch = self.__from_memory(batch, key='rewards')
+        next_state_m_batch = self.__from_memory(
+            batch,
+            key='next_states',
+            min_dims=3)
+        done_m_batch = self.__from_memory(batch, key='dones')
+
+        return {
+            'states':  states_m_batch,
+            'actions': actions_m_batch,
+            'rewards': rewards_m_batch,
+            'next_states':  next_state_m_batch,
+            'dones': done_m_batch,
+            'batch_len': batch_len
+        }
+
+    def __from_memory(self, batch, key, min_dims=0):
+        """
+            Gives states, actions, rewards, as mini
+            batches from a memory sample
+        """
+        m_b = np.array((batch.get(key)), ndmin=min_dims)
+        return m_b
+
+    def get_q_values(self, sess, m_batches):
+        """
+            Gets Q values
+            - Q values for the  next state
+            - Target Q values
+        """
+        _, _, rewards, next_states, dones, batch_len = m_batches
+        target_Qs_batch = []
+
+        # Next state
+        Q_s = sess.run(self.output,
+                       feed_dict={self.inputs: next_states})
+
+        # Target Qs
+        # r:= if episode ends at s + 1 # else gamma * max[Q(s', a')]
+        for batch in range(batch_len):
+            terminal = dones[batch]
+            rewards_mb = rewards[batch]
+
+            if terminal:
+                target_Qs_batch.append(rewards_mb)
+            else:
+                target_Qs_batch.append(
+                    rewards_mb + self.gamma * np.max(Q_s[batch]))
+
+        target_mini_batch = [m_batch for m_batch in target_Qs_batch]
+        return np.array(target_mini_batch)
+
+    def find_loss(self, sess, targets, mini_batches):
+        """
+            Finds the training loss
+        """
+        return sess.run(
+            [self.loss, self.optimizer],
+            feed_dict={
+                self.inputs: mini_batches.get('states'),
+                self.target_Q: mini_batches.get('targets'),
+                self.actions: mini_batches.get('actions')
+            }
+        )
+
+    def summarize(self, sess, mini_batches, targets, episode):
+        """
+            Writes tf summaries
+        """
+        summary = sess.run(
+            self.writer_op,
+            feed_dict={self.inputs: mini_batches.get('states'),
+                       self.target_Q: mini_batches.get('targets'),
+                       self.actions: mini_batches.get('actions')}
+        )
+        self.writer.add_summary(summary, episode)
+        self.writer.flush()
+
+    def _save(self, sess, count):
+        """
+            Saves the model checkpoints
+        """
+        if not count % 5:
+            self.saver.save(sess, '.models/atari.ckpt')
