@@ -448,7 +448,7 @@ class DoomDqNet:
                     reward = self.game.get_total_reward()
                 print(f'score: {reward}')
                 total_reward += reward
-            print(f'Total reward: {total_reward/100}')
+            print(f'Total reward: {total_reward/episodes}')
             self.game.close()
 
 
