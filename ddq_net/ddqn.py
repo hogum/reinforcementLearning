@@ -241,3 +241,33 @@ class DoomDDpqN:
             self.ISweights *
             tf.squared_difference(self.target_Q, self.Q))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
+    def prepopulate(self, episodes):
+        """
+            Creates random experiences to hold in memory
+        """
+        memory = Memory(self.memory_size)
+
+        game, self.actions_choice = create_env()
+        game.new_episode()
+        state = game.get_state().screen_buffer
+        state, stacked_frames = stack_frames(state, new_episode=True)
+
+        for episode in range(episodes):
+            action = np.random.choice(self.actions_choice.shape[0], size=1)][0]
+            reward = game.make_action(list(action))
+            done = game.is_episode_finished()
+
+            if done:
+                next_state = np.zeros(state.shape, dtype=np.int)
+                self.memory + [state, action, reward, next_state, done]
+
+                game.new_episode()
+                state = game.get_state().screen_buffer
+                state, stacked_frames = stack_frames(state,new_episode=True)
+            else:
+                next_state = game.get_state().screen_buffer
+                next_state, stacked_frames = stack_frames(next_state, stacked_frames)
+                self.memory +  [state, action, reward, next_state, done]
+                state = next_state
+
+
