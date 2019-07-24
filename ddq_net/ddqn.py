@@ -241,6 +241,7 @@ class DoomDDpqN:
             self.ISweights *
             tf.squared_difference(self.target_Q, self.Q))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
+
     def prepopulate(self, episodes):
         """
             Creates random experiences to hold in memory
@@ -253,7 +254,7 @@ class DoomDDpqN:
         state, stacked_frames = stack_frames(state, new_episode=True)
 
         for episode in range(episodes):
-            action = np.random.choice(self.actions_choice.shape[0], size=1)][0]
+            action = np.random.choice(self.actions_choice.shape[0], size=1)[0]
             reward = game.make_action(list(action))
             done = game.is_episode_finished()
 
@@ -263,11 +264,19 @@ class DoomDDpqN:
 
                 game.new_episode()
                 state = game.get_state().screen_buffer
-                state, stacked_frames = stack_frames(state,new_episode=True)
+                state, stacked_frames = stack_frames(state, new_episode=True)
             else:
                 next_state = game.get_state().screen_buffer
-                next_state, stacked_frames = stack_frames(next_state, stacked_frames)
-                self.memory +  [state, action, reward, next_state, done]
+                next_state, stacked_frames = stack_frames(
+                    next_state, stacked_frames)
+                self.memory + [state, action, reward, next_state, done]
                 state = next_state
 
-
+    def setup_writer(self):
+        """
+            Sets up the tf summary writer
+        """
+        self.writer = tf.compat.v1.summary.FileWriter(
+            'root/tensorboard/dddqn/1')
+        tf.compat.v1.summary.scalar('Loss', self.loss)
+        self.writer_op = tf.compat.v1.summary.merge_all()
