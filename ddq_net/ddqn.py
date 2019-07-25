@@ -14,12 +14,14 @@ import numpy as np
 import vizdoom as vz
 from skimage import transform
 
+from memory import Memory
+
 resolution = (100, 120)
 stack_size = 4
 VISIBLE = False
 
 STACKED_FRAMES_ = deque(
-    [np.zeros(RESOLUTON, dtype=np.int) for _ in range(stack_size)],
+    [np.zeros(resolution, dtype=np.int) for _ in range(stack_size)],
     maxlen=4)
 
 
@@ -165,7 +167,7 @@ class DoomDDpqN:
         )
 
         conv_three = tf.layers.conv2d(
-            inputs=conv2_out,
+            inputs=conv_two_out,
             filters=128,
             kernel_size=(4, 4),
             strides=(2, 2),
@@ -189,7 +191,7 @@ class DoomDDpqN:
             kernel_initializer=tf.contrib.layers.xavier_initializer(),
             name='value_fc'
         )
-        value = tf.layers.dense(
+        self.value = tf.layers.dense(
             inputs=value_fc,
             units=1,
             activation=None,
@@ -203,7 +205,7 @@ class DoomDDpqN:
             units=512,
             kernel_initializer=tf.contrib.layers.xavier_initializer(),
             name='advantg_fc')
-        advantg = tf.layers.dense(
+        self.advantg = tf.layers.dense(
             inputs=advantg_fc,
             activation=None,
             units=self.action_size,
@@ -246,7 +248,7 @@ class DoomDDpqN:
         """
             Creates random experiences to hold in memory
         """
-        memory = Memory(self.memory_size)
+        self.memory = Memory(self.memory_size)
 
         game, self.actions_choice = create_env()
         game.new_episode()

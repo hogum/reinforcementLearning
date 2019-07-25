@@ -27,6 +27,9 @@ class SumTree:
 
     @property
     def root(self):
+        """
+            Root node
+        """
         return self.tree[0]
 
     def add(self, priority, items):
@@ -47,12 +50,15 @@ class SumTree:
             Updates the priority score, propagating
             the change throughout the tree
         """
+        # Index to place experience
         tree_idx = self.pointer + self.parent_nodes
+
         # change: = New priority score - previous score
         change = priority - self.tree[tree_idx]
+        self.tree[tree_idx] = priority
 
         while tree_idx:
-            tree_idx = (tree_idx - 1) / 2
+            tree_idx = (tree_idx - 1) // 2
             self.tree[tree_idx] += change
 
     def pluck_leaf(self, loc):
