@@ -209,7 +209,7 @@ class DoomDDpqN:
             inputs=advantg_fc,
             activation=None,
             units=self.action_size,
-            kernel_size=tf.contrib.layers.xavier_initializer(),
+            kernel_initializer=tf.contrib.layers.xavier_initializer(),
             name='advantage')
 
     def _dense(self, inputs, units, activation=None, name='', **kwargs):
@@ -250,22 +250,22 @@ class DoomDDpqN:
         """
         self.memory = Memory(self.memory_size)
 
-        game, self.actions_choice = create_env()
-        game.new_episode()
+        self.game, self.actions_choice = create_env()
+        self.game.new_episode()
         state = game.get_state().screen_buffer
         state, stacked_frames = stack_frames(state, new_episode=True)
 
         for episode in range(episodes):
             action = np.random.choice(self.actions_choice.shape[0], size=1)[0]
-            reward = game.make_action(list(action))
-            done = game.is_episode_finished()
+            reward = self.game.make_action(list(action))
+            done = self.game.is_episode_finished()
 
             if done:
                 next_state = np.zeros(state.shape, dtype=np.int)
                 self.memory + [state, action, reward, next_state, done]
 
-                game.new_episode()
-                state = game.get_state().screen_buffer
+                self.game.new_episode()
+                state = self.game.get_state().screen_buffer
                 state, stacked_frames = stack_frames(state, new_episode=True)
             else:
                 next_state = game.get_state().screen_buffer
@@ -282,3 +282,51 @@ class DoomDDpqN:
             'root/tensorboard/dddqn/1')
         tf.compat.v1.summary.scalar('Loss', self.loss)
         self.writer_op = tf.compat.v1.summary.merge_all()
+        self.saver = tf.train.Saver()
+
+    def predict_action(self, sess, state, decay_step):
+        """
+            Predicts the next action for the agent.
+
+            Uses the value of epsilon to select a random value
+            or action at argmax(Q[s, a])
+        """
+        explore_exploit_tradeoff = np.random.uniform()
+        explore_prob = self.min_eps + \
+            (self.max_eps - self.min_eps) * np.exp(-self.eps * decay_step)
+
+        if explore_prob > explore_exploit_tradeoff:
+            # Explore
+            action = self.possible_actions[np.random.choice(
+                self.possible_actions.shape[0], size=1)][0]
+        else:
+            # Exploit -> Estimate Q values state
+            Qs = sess.run(
+                self.output,
+                feed_dict={
+                    self.inputs: state.reshape((1, *state.shape))})
+            # Best action
+            choice = np.argmax(Qs)
+            action = self.possible_actions[int(choice)]
+        return list(action), explore_prob
+
+    def update_target_graph(self):
+        """
+            Copies parameters of the DQN to the target network
+        """
+        from_vars = tf.collection(tf.GraphKeys.TRAINABLE_VARIABLES, 'DQNet')
+        to_vars = tf.collection(tf.GraphKeys.TRAINABLE_VARIABLES, 'TargetNet')
+
+        up_holder = [to_vars.assign(from_vars)
+                     for from_vars, to_vars in zip(from_vars, to_vars)]
+        return up_holder
+    def train(self, episodes=50, batch_size=64, max_steps=300, training=True):
+        """
+            Trains the model
+        """
+        if training:
+            with tf.Session() as sess:
+                sess.run(tf.global_variables_initializer())
+                decay_step = 0
+                tau = 0
+                self.game.init()
