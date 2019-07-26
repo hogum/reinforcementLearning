@@ -4,7 +4,7 @@
 """
 import numpy as np
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 class SumTree:
@@ -120,6 +120,9 @@ class Memory:
     per_b_max: float = 1.
     abs_err_max: float = 1.
     tree = SumTree(capacity)
+
+    def __add__(self, experience):
+        return self.add(experience)
 
     def add(self, exp):
         """

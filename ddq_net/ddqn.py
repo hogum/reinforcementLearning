@@ -120,7 +120,7 @@ class DoomDDdqN:
         """
             Builds the Networks to use in training
         """
-        with tf.compat.v1.variable_scope(self.name):
+        with tf.compat.v1.variable_scope(self.name, reuse=tf.AUTO_REUSE):
 
             self.inputs = tf.compat.v1.placeholder(
                 tf.float32,
@@ -150,7 +150,7 @@ class DoomDDdqN:
             kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
             name='conv_one'
         )
-        conv_one_out = tf.nn.relu(inputs=conv_one, name='conv_one_out')
+        conv_one_out = tf.nn.relu(features=conv_one, name='conv_one_out')
 
         conv_two = tf.layers.conv2d(
             inputs=conv_one_out,
@@ -162,7 +162,7 @@ class DoomDDdqN:
             name='conv_two'
         )
         conv_two_out = tf.nn.relu(
-            inputs=conv_two,
+            features=conv_two,
             name='conv_two'
         )
 
@@ -175,10 +175,11 @@ class DoomDDdqN:
             kernel_initializer=tf.contrib.layers.xavier_initializer_conv2d(),
             name='conv_three'
         )
-        conv_three_out = tf.nn.relu(inputs=conv_three, name='conv_three_out')
+        conv_three_out = tf.nn.relu(features=conv_three, name='conv_three_out')
 
         flatten = tf.layers.flatten(conv_three_out)
         self.separate_to_streams(flatten)
+        self.aggregate()
 
     def separate_to_streams(self, flatten):
         """
@@ -244,7 +245,7 @@ class DoomDDdqN:
             tf.squared_difference(self.target_Q, self.Q))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.loss)
 
-    def prepopulate(self, episodes):
+    def prepopulate(self, episodes=100000):
         """
             Creates random experiences to hold in memory
         """
@@ -257,12 +258,14 @@ class DoomDDdqN:
 
         for episode in range(episodes):
             action = np.random.choice(self.actions_choice.shape[0], size=1)[0]
-            reward = self.game.make_action(list(action))
+            action = list(self.actions_choice[action])
+            reward = self.game.make_action(action)
             done = self.game.is_episode_finished()
+            print(f'Episode {episode}: {done}')
 
             if done:
                 next_state = np.zeros(state.shape, dtype=np.int)
-                self.memory + [state, action, reward, next_state, done]
+                self.memory + (state, action, reward, next_state, done)
 
                 self.game.new_episode()
                 state = self.game.get_state().screen_buffer
@@ -271,7 +274,7 @@ class DoomDDdqN:
                 next_state = self.game.get_state().screen_buffer
                 next_state, stacked_frames = stack_frames(
                     next_state, stacked_frames)
-                self.memory + [state, action, reward, next_state, done]
+                self.memory + (state, action, reward, next_state, done)
                 state = next_state
 
     def setup_writer(self):
@@ -323,7 +326,7 @@ class DoomDDdqN:
                      for from_vars, to_vars in zip(from_vars, to_vars)]
         return up_holder
 
-    def train(self, episodes=50, batch_size=64, max_steps=300, training=True):
+    def train(self, episodes=5000, batch_size=64, max_steps=3000, training=True):
         """
             Trains the model
         """
@@ -453,6 +456,7 @@ class DoomDDdqN:
         """
         tree_index, batch, IS_weights = self.memory.sample(batch_size)
         states = self.__from_memory(batch, key=0, min_dims=3)
+        breakpoint()
         actions = self.__from_memory(batch, 1)
         rewards = self.__from_memory(batch, 2)
         next_states = self.__from_memory(batch, 3, 3)
