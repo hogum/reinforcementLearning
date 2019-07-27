@@ -49,7 +49,7 @@ def preprocess_frame(frame):
     """
     frame = frame / 255
 
-    return transform.resize(frame[1], (*resolution, 1))
+    return transform.resize(frame, resolution)
 
 
 def get_state_size():
@@ -255,7 +255,6 @@ class DoomDDdqN:
         self.game.new_episode()
         state = self.game.get_state().screen_buffer
         state, stacked_frames = stack_frames(state, new_episode=True)
-
         for episode in range(episodes):
             action = np.random.choice(self.actions_choice.shape[0], size=1)[0]
             action = list(self.actions_choice[action])
@@ -360,9 +359,10 @@ class DoomDDdqN:
                         done = self.game.is_episode_finished()
 
                         if done:
-                            next_state = np.zeros((120, 140),
-                                                  # resolution,
-                                                  dtype=np.int)
+                            next_state = np.zeros(
+                                # (120, 140),
+                                resolution,
+                                dtype=np.int)
                             next_state, stacked_frames = stack_frames(
                                 next_state, stacked_frames)
                             step = max_steps
@@ -456,16 +456,15 @@ class DoomDDdqN:
         """
         tree_index, batch, IS_weights = self.memory.sample(batch_size)
         states = self.__from_memory(batch, key=0, min_dims=3)
-        breakpoint()
         actions = self.__from_memory(batch, 1)
         rewards = self.__from_memory(batch, 2)
         next_states = self.__from_memory(batch, 3, 3)
         dones = self.__from_memory(batch, 4)
-
         return {
-            'states': states,
+            'states': states,  # np.array([x[0] for x in states]),
             'actions': actions,
             'rewards': rewards,
+            # np.array([x[0] for x in next_states]),
             'next_states': next_states,
             'dones': dones,
             'batch_len': len(batch),
@@ -478,7 +477,7 @@ class DoomDDdqN:
             batches from a memory sample
         """
         f_key = 0
-        m_b = np.array(batch[f_key][key], ndmin=min_dims)
+        m_b = np.array([m_bch[f_key][key]for m_bch in batch], ndmin=min_dims)
 
         return m_b
 

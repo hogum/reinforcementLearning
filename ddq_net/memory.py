@@ -24,8 +24,8 @@ class SumTree:
         self.capacity = capacity
         # leaf_nodes = capacity
         self.parent_nodes = capacity - 1
-        self.tree = np.zeros(2 * self.parent_nodes)
-        self.data = np.zeros(capacity, dtype=object)  # Expriences
+        self.tree = np.zeros(2 * capacity - 1)
+        self.data = np.zeros(capacity, dtype=object)  # Experiences
 
     @property
     def root(self):
@@ -38,11 +38,10 @@ class SumTree:
         """
             Adds priority score and items to data
         """
+        # Index to place experience
+        tree_idx = self.pointer + self.capacity - 1
         # Update frame
         self.data[self.pointer] = items
-        # Index to place experience
-        tree_idx = self.pointer + self.parent_nodes
-
         self.update(tree_idx, priority)
         self.pointer += 1
 
@@ -84,7 +83,6 @@ class SumTree:
                     loc -= self.tree[left_child_idx]
                     parent_idx = right_child_idx
         data_idx = leaf_idx - self.capacity + 1
-
         return leaf_idx, self.tree[leaf_idx], self.data[data_idx]
 
 
@@ -144,14 +142,14 @@ class Memory:
              - IS weights for each element in the mini batch are calculated
         """
         mini_batch = []
-        batch_idx = np.empty((s_size), dtype=np.int32)
+        batch_idx = np.empty((s_size,), dtype=np.int32)
         b_IS_weights = np.empty((s_size, 1), dtype=np.float32)
 
         # Priotity segement [0.. priority_max]
         priority_segment = self.tree.root / s_size
         self.per_b = np.min([self.per_b_max, self.per_b + self.per_b_inc])
         p_min = np.min(self.tree.tree[-self.tree.capacity:]) / self.tree.root
-        max_weight = (p_min * s_size)**-self.per_b
+        max_weight = (p_min * s_size)**(-self.per_b)
 
         for i in range(s_size):
             sample_p = np.random.uniform(
@@ -166,8 +164,7 @@ class Memory:
             b_IS_weights[i, 0] = np.power(
                 s_size * sampling_probabilities, -self.per_b) / max_weight
             batch_idx[i] = idx
-            experience = [exprns]
-            mini_batch.append(experience)
+            mini_batch.append([exprns])
 
         return batch_idx, mini_batch, b_IS_weights
 
