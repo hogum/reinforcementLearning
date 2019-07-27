@@ -47,9 +47,10 @@ def preprocess_frame(frame):
     """
         Preprocess the screen buffer for reduced training time
     """
+    frame = (frame[0] + frame[1] + frame[2])[15:-5, 20:-20]
     frame = frame / 255
 
-    return transform.resize(frame, resolution)
+    return transform.resize(frame, *resolution)
 
 
 def get_state_size():
@@ -95,7 +96,7 @@ class DoomDDdqN:
             Maxumum value for epsilon
         name: str, default = 'DoomDqNet'
             Variable for tf namescope
-        state_size: list, default = [84, 84, 4]
+        state_size: list, default = [100, 120, 4]
             Shape of input stack
         max_tau: int
             Max C step in updating the target network

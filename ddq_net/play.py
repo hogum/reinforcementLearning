@@ -10,8 +10,8 @@ def main():
         Creates an instance of dddqn for training and play
     """
     clf = DoomDDdqN()
-    clf.prepopulate(episodes=1000)
-    clf.train(episodes=64, batch_size=64, max_steps=100)
+    clf.prepopulate(episodes=3)
+    clf.train(episodes=3, batch_size=4, max_steps=10)
     # clf.play()
 
 
