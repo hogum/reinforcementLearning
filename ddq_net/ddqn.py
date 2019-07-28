@@ -18,14 +18,13 @@ from memory import Memory
 
 resolution = (100, 120)
 stack_size = 4
-VISIBLE = False
 
 STACKED_FRAMES_ = deque(
     [np.zeros(resolution, dtype=np.int) for _ in range(stack_size)],
     maxlen=4)
 
 
-def create_env():
+def create_env(visible=False):
     """
         Creates an instance of the game environment
     """
@@ -35,7 +34,7 @@ def create_env():
     doom.load_config(os.path.join(path, 'deadly_corridor.cfg'))
     doom.set_doom_scenario_path(os.path.join(path, 'deadly_corridor.wad'))
 
-    doom.set_window_visible(VISIBLE)
+    doom.set_window_visible(visible)
     doom.init()
 
     actions = np.identity(doom.get_available_buttons_size())
@@ -47,10 +46,14 @@ def preprocess_frame(frame):
     """
         Preprocess the screen buffer for reduced training time
     """
-    frame = (frame[0] + frame[1] + frame[2])[15:-5, 20:-20]
+    try:
+        frame = np.array(frame[0] + frame[1] + frame[2])[15:-5, 20:-20]
+
+    except IndexError:
+        frame = frame
     frame = frame / 255
 
-    return transform.resize(frame, *resolution)
+    return transform.resize(frame, resolution)
 
 
 def get_state_size():
@@ -129,7 +132,7 @@ class DoomDDdqN:
                 name='inputs')
 
             self.ISweights = tf.compat.v1.placeholder(
-                tf.float32, (None, 1), name='IS_weights')
+                tf.float32, (None, 1), name='ISweights')
             self.actions = tf.compat.v1.placeholder(
                 tf.float32, (None, self.action_size), name='actions')
             self.target_Q = tf.compat.v1.placeholder(
@@ -279,10 +282,10 @@ class DoomDDdqN:
 
     def setup_writer(self):
         """
-            Sets up the tf summary writer
+            Sets up the tensorboard writer
         """
         self.writer = tf.compat.v1.summary.FileWriter(
-            'root/tensorboard/dddqn/1')
+            '/root/tensorboard/dddqn/1')
         tf.compat.v1.summary.scalar('Loss', self.loss)
         self.writer_op = tf.compat.v1.summary.merge_all()
         self.saver = tf.train.Saver()
@@ -326,7 +329,8 @@ class DoomDDdqN:
                      for from_vars, to_vars in zip(from_vars, to_vars)]
         return up_holder
 
-    def train(self, episodes=5000, batch_size=64, max_steps=3000, training=True):
+    def train(self, episodes=5000, batch_size=64,
+              max_steps=3000, training=True):
         """
             Trains the model
         """
@@ -335,7 +339,7 @@ class DoomDDdqN:
                 sess.run(tf.global_variables_initializer())
                 decay_step = 0
                 tau = 0
-                loss = ''
+                loss, acc = '', ''
                 self.game.init()
 
                 sess.run(self.update_target_graph())
@@ -372,6 +376,7 @@ class DoomDDdqN:
                             print(f'Episode {episode}' +
                                   f'Total reward: {total_reward}' +
                                   f'loss: {loss}' +
+                                  f'acc: {acc}' +
                                   f'Explore prob: {explore_prob}'
                                   )
                             exp = state, action, reward, next_state, done
@@ -383,14 +388,14 @@ class DoomDDdqN:
                             self.memory + (state, action, reward,
                                            next_state, done)
                             state = next_state
-                        acc, loss, abs_err = self._learn(
+                        loss, abs_err = self._learn(
                             sess, episode, batch_size)
-
+                        print(f'Episode: {episode}, loss {loss}')
                         if tau > self.max_tau:
                             sess.run(self.update_target_graph())
                             tau = 0
 
-                        self.save(self, sess, episode)
+                        self.save(sess, episode, interval=5)
 
     def _learn(self, sess, episode, batch_size):
         """
@@ -399,13 +404,14 @@ class DoomDDdqN:
         """
         mini_batches, tree_index = self.sample_experiences(batch_size)
         targets = self.get_target_Qs(sess, mini_batches)
-        acc, loss, abs_errs = self.find_loss(sess, targets, mini_batches)
+        loss, abs_errs = self.find_loss(
+            sess, targets, mini_batches)
 
         self.memory.update_priorities(tree_index, abs_errs)
         mini_batches.update({'targets': targets})
-        self.summarize(sess, episode, mini_batches)
+        # self.summarize(sess, episode, mini_batches)
 
-        return acc, loss, abs_errs
+        return loss, abs_errs
 
     def get_target_Qs(self, sess, mini_batch):
         """
@@ -425,7 +431,7 @@ class DoomDDdqN:
 
         for i in range(mini_batch.get('batch_len')):
             terminal = mini_batch.get('dones')[i]
-            action = np.argmax(q_next_state)[i]
+            action = np.argmax(q_next_state[i])
             rewards = mini_batch.get('rewards')[i]
 
             if terminal:
@@ -441,7 +447,7 @@ class DoomDDdqN:
         """
             Finds difference between Q and targets
         """
-        acc, loss, err = sess.run(
+        _, loss, err = sess.run(
             [self.optimizer, self.loss, self.abs_errors],
             feed_dict={self.inputs: mini_batches.get('states'),
                        self.target_Q: targets,
@@ -449,7 +455,7 @@ class DoomDDdqN:
                        self.ISweights: mini_batches.get(
                 'ISweights')
             })
-        return acc, loss, err
+        return loss, err
 
     def sample_experiences(self, batch_size):
         """
@@ -461,11 +467,11 @@ class DoomDDdqN:
         rewards = self.__from_memory(batch, 2)
         next_states = self.__from_memory(batch, 3, 3)
         dones = self.__from_memory(batch, 4)
+
         return {
-            'states': states,  # np.array([x[0] for x in states]),
+            'states': states,
             'actions': actions,
             'rewards': rewards,
-            # np.array([x[0] for x in next_states]),
             'next_states': next_states,
             'dones': dones,
             'batch_len': len(batch),
@@ -491,11 +497,12 @@ class DoomDDdqN:
             feed_dict={self.inputs: batches.get('states'),
                        self.target_Q: batches.get('targets'),
                        self.actions: batches.get('actions'),
-                       self.ISweights: batches.get('ISweights')})
+                       self.ISweights: batches.get('ISweights')
+                       })
         self.writer.add_summary(summary, episode)
         self.writer.flush()
 
-    def save(self, sess, episode, interval=5):
+    def save(self, sess, episode, interval):
         """
             Updates and saves the model
         """
@@ -506,14 +513,19 @@ class DoomDDdqN:
         """
            Plays the trained agent
         """
+        path = '/usr/local/lib/python3.7/dist-packages/vizdoom/scenarios/'
+
         with tf.compat.v1.Session() as sess:
-            game, actions_choice = create_env()
-            game.load_config('deadly_corridor_testing.cfg')
-            game.set_doom_scenario_path('deadly_corridor.wad')
+            game, actions_choice = create_env(visible=True)
+            game.load_config(os.path.join(path,
+                                          'deadly_corridor.cfg'))
+            game.set_doom_scenario_path(
+                os.path.join(path, 'deadly_corridor.wad'))
             eps = .01
 
             self.saver.restore(sess, './models/dddqn.ckpt')
             game.init()
+            total_score = []
 
             for i in range(episodes):
                 game.new_episode()
@@ -546,7 +558,10 @@ class DoomDDdqN:
                         state = next_state
                     else:
                         break
-                print(f'Score: {game.get_total_reward()}')
+                reward = game.get_total_reward()
+                print(f'reward: {reward}')
+                total_score.append(reward)
+            print(f'\nScore: {np.sum(total_score) / episodes}')
             game.close()
 
 

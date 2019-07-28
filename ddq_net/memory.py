@@ -173,7 +173,7 @@ class Memory:
             Updates priorities on the tree
         """
         abs_errors += self.per_e
-        clipped_errs = np.min(abs_errors, self.abs_err_max)
+        clipped_errs = np.minimum(abs_errors, self.abs_err_max)
         ps = np.power(clipped_errs, self.per_a)
 
         for tree_idx_, pr in zip(tree_idx, ps):
