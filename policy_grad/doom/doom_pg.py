@@ -257,8 +257,9 @@ class DoomDDdqN:
             finds gradient and backpropagates
         """
         feeds = {
-            self.inputs: np.vstack(np.array(output.get('states'))),
-            self.actions: np.vstack(np.array(output.get('actions'))),
+            self.inputs: output.get('states').reshape((
+                len(output.get('states')), *self.state_size)),
+            self.actions: output.get('actions'),
             self.discounted_eps_rw: output.get('disc_rewards'),
             self.mean_reward: output.get('mean')
         }
@@ -349,3 +350,43 @@ class DoomDDdqN:
                 np.stack(np.array(actions)),
                 np.concatenate(batch_rewards),
                 np.concatenate(disc_rewards)), episode
+
+    def play(self, episodes):
+        """
+            Plays trained agent
+        """
+        with tf.compat.v1.Session() as sess:
+            game, actions_choice = create_env()
+            self.saver.restore(sess, '.models/doom_pg.ckpt')
+
+            for episode in range(episodes):
+                game.new_episode()
+
+                state = game.get_state().screen_buffer
+                state, stacked_frames = stack_frames(state, new_episode=True)
+
+                while not game.is_episode_finished():
+                    action_probability = sess.run(
+                        self.action_distribution,
+                        feed_dict={self.inputs: state.reshape(
+                            (1, *self.state_size))}
+                    )
+                    action = np.random.choice(
+                        range(action_probability.shape[1]),
+                        p=action_probability.ravel())
+                    action = actions_choice[action]
+
+                    game.make_action(action)
+                    done = game.is_episode_finished()
+
+                    if not done:
+                        next_state = game.get_state().screen_buffer
+                        next_state, stacked_frames = stack_frames(
+                            next_state, stacked_frames)
+                        state = next_state
+                    else:
+                        break
+                print(f'Episode{episode} ' +
+                      f'score: {game.get_total_reward()}'
+                      )
+            game.close()
