@@ -13,6 +13,7 @@ class CartPole:
 
     def __init__(self, lr=.002, gamma=.95):
         self.gamma = gamma
+        self.action_space, self.observation_space = self.setup_env()
 
     def preprocess_rewards(self, rewards):
         """
@@ -39,4 +40,16 @@ class CartPole:
         env.seed(1)
         self.env = env
 
-        # return self.env.action_space.n, self.env.observation_space
+        return self.env.action_space.n, self.env.observation_space
+    def build_model(self):
+        """
+            Builds the Policy Gradient model
+        """
+        with tf.name_scope('inputs'):
+            self.inputs = tf.compat.v1.placeholder(tf.float32,
+                    (None, self.observation_space), name='inputs')
+            self.actions = tf.compat.v1.placeholder(tf.float32,
+                    (None, self.action_space), name='actions')
+            self.dicounted_episode_rewards = tf.compat.v1.placeholder(tf.float32,
+                    (None, ), name='dicounted_episode_rewards')
+
