@@ -15,6 +15,7 @@ class CartPole:
         self.gamma = gamma
         self.lr = lr
         self.action_space, self.observation_space = self.setup_env()
+        self.build_model()
         self.setup_writer()
 
     def preprocess_rewards(self, rewards):
@@ -38,11 +39,11 @@ class CartPole:
             Initializes the game environment
         """
         env = gym.make('CartPole-v0')
-        env.unwrap
+        env = env.unwrapped
         env.seed(1)
         self.env = env
 
-        return self.env.action_space.n, self.env.observation_space
+        return self.env.action_space.n, self.env.observation_space.shape
 
     def build_model(self):
         """
@@ -51,7 +52,7 @@ class CartPole:
         with tf.name_scope('inputs'):
             self.inputs = tf.compat.v1.placeholder(
                 tf.float32,
-                (None, self.observation_space),
+                (None, *self.observation_space),
                 name='inputs'
             )
             self.actions = tf.compat.v1.placeholder(
@@ -64,7 +65,7 @@ class CartPole:
                 (None, ),
                 name='dicounted_episode_rewards'
             )
-            self.mean_reward = tf.compat.vi.placeholder(
+            self.mean_reward = tf.compat.v1.placeholder(
                 tf.float32,
                 name='mean_reward'
             )
@@ -141,10 +142,10 @@ class CartPole:
                         mean_reward = np.divide(np.sum(rewards_), episode + 1)
                         max_reward = np.amax(rewards_)
 
-                        print('\n############################' +
-                              f'Episode: {episode}' +
-                              f'reward: {rewards_[episode]}' +
-                              f'mean r: {mean_reward}' +
+                        print('\n############################\n' +
+                              f'Episode: {episode} ' +
+                              f'reward: {rewards_[episode]} ' +
+                              f'mean r: {mean_reward} ' +
                               f'max r: {max_reward}')
                         disc_rewards = self.preprocess_rewards(episode_rewards)
                         res = dict(states=episode_states,
@@ -153,7 +154,9 @@ class CartPole:
                                    mean=mean_reward
                                    )
 
-                        self.feed_forward(sess, res)
+                        loss = self.feed_forward(
+                            sess, output=res, forward=True)
+                        print(f'Loss: {loss}')
                         self.feed_forward(sess, inputs=self.writer_op,
                                           output=res, forward=False,
                                           episode=episode)
@@ -173,11 +176,16 @@ class CartPole:
             self.discounted_episode_rewards: output.get('disc_rewards'),
             self.mean_reward: output.get('mean')
         }
-        feeds.pop('mean') if kwargs.get('forward') else None
-        res = sess.run(
-            inputs or [self.loss, self.optimizer],
-            feed_dict=feeds
-        )
+
+        try:  # Cant boolean tensor, meaning not None already
+            inputs = [self.loss, self.optimizer] if not inputs else inputs
+        except TypeError:
+            pass
+
+        _ = feeds.pop(self.mean_reward) if kwargs.get('forward') else None
+        res = sess.run(inputs,
+                       feed_dict=feeds
+                       )
 
         return res[0] if kwargs.get(
             'forward') else self.summarize(sess,
@@ -199,7 +207,7 @@ class CartPole:
             Writes tf summaries
         """
         self.writer.add_summary(summary, episode)
-        self.writer.flush
+        self.writer.flush()
 
     def save(self, sess, count):
         """
@@ -208,6 +216,7 @@ class CartPole:
         if not count % 50:
             self.saver.save(sess, '.models/model.ckpt')
             print('Saved')
+
     def play(self, episodes=25):
         """
             Plays with trained agent
@@ -218,17 +227,19 @@ class CartPole:
 
             for episode in range(episodes):
                 state = self.env.reset()
-                step = 0
                 eps_rewards = 0
                 print(f'\n---------------\n{episode}')
 
                 while True:
                     action_prob = sess.run(
-                            self.action_distribution,
-                            feed_dict={self.inputs: state.reshape((1, 4))}
-                            )
-                    action = np.random.choice(range(action_prob.shape[1],
-                        p=action_prob.ravel()))
+                        self.action_distribution,
+                        feed_dict={
+                            self.inputs: state.reshape(
+                                (1, 4))
+                        }
+                    )
+                    action = np.random.choice(range(action_prob.shape[1]),
+                                              p=action_prob.ravel())
                     new_state, reward, done, _ = self.env.step(action)
                     eps_rewards += reward
 
@@ -238,4 +249,10 @@ class CartPole:
                         break
                     state = new_state
                 self.env.close()
-                print(f'Score: {rewards/episodes}')
+                print(f'Score: {np.sum(rewards)/episodes}')
+
+
+if __name__ == '__main__':
+    game = CartPole()
+    game.train(episodes=10)
+    game.play()
