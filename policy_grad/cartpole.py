@@ -13,6 +13,7 @@ class CartPole:
 
     def __init__(self, lr=.002, gamma=.95):
         self.gamma = gamma
+        self.lr = lr
         self.action_space, self.observation_space = self.setup_env()
         self.setup_writer()
 
@@ -207,3 +208,34 @@ class CartPole:
         if not count % 50:
             self.saver.save(sess, '.models/model.ckpt')
             print('Saved')
+    def play(self, episodes=25):
+        """
+            Plays with trained agent
+        """
+        with tf.compat.v1.Session() as sess:
+            rewards = []
+            self.saver.restore(sess, '.models/model.ckpt')
+
+            for episode in range(episodes):
+                state = self.env.reset()
+                step = 0
+                eps_rewards = 0
+                print(f'\n---------------\n{episode}')
+
+                while True:
+                    action_prob = sess.run(
+                            self.action_distribution,
+                            feed_dict={self.inputs: state.reshape((1, 4))}
+                            )
+                    action = np.random.choice(range(action_prob.shape[1],
+                        p=action_prob.ravel()))
+                    new_state, reward, done, _ = self.env.step(action)
+                    eps_rewards += reward
+
+                    if done:
+                        rewards += [eps_rewards]
+                        print(f'Reward: {eps_rewards}')
+                        break
+                    state = new_state
+                self.env.close()
+                print(f'Score: {rewards/episodes}')
