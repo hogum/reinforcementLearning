@@ -25,8 +25,9 @@ class CartPole:
         discounted_rewds = np.zeros_like(rewards)
         cumulative = 0
 
-        for i in range(len(rewards)):
-            cumulative += self.gamma + rewards[i]
+        for i in reversed(range(len(rewards))):
+            cumulative *= self.gamma
+            cumulative += rewards[i]
             discounted_rewds[i] = cumulative
 
         discounted_rewds = (discounted_rewds -
@@ -253,6 +254,6 @@ class CartPole:
 
 
 if __name__ == '__main__':
-    game = CartPole()
-    game.train(episodes=10)
+    game = CartPole(lr=0.001)
+    game.train(episodes=100)
     game.play()
