@@ -50,15 +50,23 @@ class CartPole:
         with tf.name_scope('inputs'):
             self.inputs = tf.compat.v1.placeholder(
                 tf.float32,
-                (None, self.observation_space), name='inputs')
+                (None, self.observation_space),
+                name='inputs'
+            )
             self.actions = tf.compat.v1.placeholder(
                 tf.float32,
-                (None, self.action_space), name='actions')
+                (None, self.action_space),
+                name='actions'
+            )
             self.discounted_episode_rewards = tf.compat.v1.placeholder(
                 tf.float32,
-                (None, ), name='dicounted_episode_rewards')
+                (None, ),
+                name='dicounted_episode_rewards'
+            )
             self.mean_reward = tf.compat.vi.placeholder(
-                tf.float32, name='mean_reward')
+                tf.float32,
+                name='mean_reward'
+            )
 
             with tf.name_scope("fc_one"):
                 fc_one = tf.contrib.layers.fully_connected(
@@ -99,7 +107,81 @@ class CartPole:
         """
             Trains the agent
         """
-        pass
+        self.saver = tf.train.Saver()
+        total_rewards = []
+
+        with tf.compat.v1.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+
+            for episode in range(episodes):
+                episode_states, episode_actions, episode_rewards = [], [], []
+                state = self.env.reset()
+                self.env.render()
+
+                while True:
+                    action_prob_distribution = sess.run(
+                        self.action_distribution,
+                        feed_dict={
+                            self.inputs: state.reshape((1, 4))}
+                    )
+                    action = np.random.choice(range(
+                        action_prob_distribution.shape[1]),
+                        p=action_prob_distribution.ravel())
+                    new_state, reward, done, info = self.env.step(action)
+                    episode_states += [state]
+                    action_s = np.zeros(self.action_space)
+                    action_s[action] = 1
+                    episode_actions += [action_s]
+                    episode_rewards += [reward]
+
+                    if done:
+                        total_rewards += [episode_rewards]
+                        rewards_ = [np.sum(x) for x in total_rewards]
+                        mean_reward = np.divide(np.sum(rewards_), episode + 1)
+                        max_reward = np.amax(rewards_)
+
+                        print('\n############################' +
+                              f'Episode: {episode}' +
+                              f'reward: {rewards_[episode]}' +
+                              f'mean r: {mean_reward}' +
+                              f'max r: {max_reward}')
+                        disc_rewards = self.preprocess_rewards(episode_rewards)
+                        res = dict(states=episode_states,
+                                   actions=episode_actions,
+                                   disc_rewards=disc_rewards,
+                                   mean=mean_reward
+                                   )
+
+                        self.feed_forward(sess, res)
+                        self.feed_forward(sess, inputs=self.writer_op,
+                                          output=res, forward=False,
+                                          episode=episode)
+                        break
+
+                    state = new_state
+                self.save(sess, episode)
+
+    def feed_forward(self, sess, inputs=[], output={}, **kwargs):
+        """
+            Feeds inputs across the nn nodes,
+            finds gradient and backpropagates
+        """
+        feeds = {
+            self.inputs: np.vstack(np.array(output.get('states'))),
+            self.actions: np.vstack(np.array(output.get('actions'))),
+            self.discounted_episode_rewards: output.get('disc_rewards'),
+            self.mean_reward: output.get('mean')
+        }
+        feeds.pop('mean') if kwargs.get('forward') else None
+        res = sess.run(
+            inputs or [self.loss, self.optimizer],
+            feed_dict=feeds
+        )
+
+        return res[0] if kwargs.get(
+            'forward') else self.summarize(sess,
+                                           res,
+                                           kwargs.get('episode'))
 
     def setup_writer(self):
         """
@@ -110,3 +192,18 @@ class CartPole:
         tf.compat.v1.summary.scalar('loss', self.loss)
         tf.compat.v1.summary.scalar('reward_mean', self.mean_reward)
         self.writer_op = tf.compat.v1.summary.merge_all()
+
+    def summarize(self, sess, summary, episode):
+        """
+            Writes tf summaries
+        """
+        self.writer.add_summary(summary, episode)
+        self.writer.flush
+
+    def save(self, sess, count):
+        """
+            Saves model checkpoints
+        """
+        if not count % 50:
+            self.saver.save(sess, '.models/model.ckpt')
+            print('Saved')
