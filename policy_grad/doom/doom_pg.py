@@ -79,7 +79,7 @@ def stack_frames(state, stacked_frames=None, new_episode=False):
 
 
 @dataclass
-class DoomDDdqN:
+class DoomPG:
     """
         Deep Q Network model for doom.
 
@@ -139,35 +139,89 @@ class DoomDDdqN:
                     tf.float32,
                     name='mean_reward')
 
-                with tf.name_scope('fc_one'):
-                    fc_one = tf.contrib.layers.fully_connected(
+                with tf.name_scope('conv_one'):
+                    conv_one = tf.layers.conv2d(
                         inputs=self.inputs,
-                        num_ouputs=10,
-                        activation_fn=tf.nn.relu,
-                        weights_initializer=tf.contrib.
-                        layers.xavier_initializer()
+                        filters=32,
+                        kernel_size=[8, 8],
+                        strides=(4, 4),
+                        padding='valid',
+                        kernel_initializer=tf.contrib.
+                        layers.xavier_initializer_conv2d(),
+                        name='conv_one'
                     )
-                with tf.name_scope('fc_two'):
-                    fc_two = tf.contrib.layers.fully_connected(
-                        inputs=fc_one,
-                        num_ouputs=self.action_size,
-                        weights_initializer=tf.contrib.
-                        layers.xavier_initializer(),
-                        activation_fn=None
+                    conv_one_bn = tf.layers.batch_normalization(
+                        conv_one,
+                        training=True,
+                        epsilon=1e-5,
+                        name='batch_norm_one'
                     )
-                with tf.name_scope('fc_three'):
-                    fc_three = tf.contrib.layers.fully_connected(
-                        inputs=fc_two,
-                        num_ouputs=self.action_size,
-                        weights_initializer=tf.contrib.
-                        layers.xavier_initializer(),
-                        activation_fn=None
+                    conv_one_out = tf.nn.relu(conv_one_bn, name='conv_one_out')
+                with tf.name_scope('conv_two'):
+                    conv_two = tf.layers.conv2d(
+                        inputs=conv_one_out,
+                        filters=64,
+                        kernel_size=[4, 4],
+                        strides=(2, 2),
+                        padding='valid',
+                        kernel_initializer=tf.contrib.
+                        layers.xavier_initializer_conv2d(),
+                        name='conv_two'
+                    )
+
+                    conv_two_bn = tf.layers.batch_normalization(
+                        conv_two,
+                        training=True,
+                        epsilon=1e-5,
+                        name='batch_norm_two'
+                    )
+                    conv_two_out = tf.nn.relu(conv_two_bn, name='conv_two_out')
+                with tf.name_scope('conv_three'):
+
+                    conv_three = tf.layers.conv2d(
+                        inputs=conv_two_out,
+                        filters=128,
+                        kernel_size=[4, 4],
+                        strides=(2, 2),
+                        padding='valid',
+                        kernel_initializer=tf.contrib.
+                        layers.xavier_initializer_conv2d(),
+                        name='conv_three'
+                    )
+
+                    conv_three_bn = tf.layers.batch_normalization(
+                        conv_three,
+                        training=True,
+                        epsilon=1e-5,
+                        name='batch_norm_three'
+                    )
+                    conv_three_out = tf.nn.relu(
+                        conv_three_bn, name='conv_three_out')
+                with tf.name_scope('flatten'):
+                    flatten = tf.layers.flatten(conv_three_out)
+                with tf.name_scope('fc'):
+                    fc = tf.layers.dense(
+                        inputs=flatten,
+                        units=512,
+                        activation=tf.nn.relu,
+                        kernel_initializer=tf.contrib.layers.
+                        xavier_initializer(),
+                        name='fc'
+                    )
+                with tf.name_scope('logits'):
+                    logits = tf.layers.dense(
+                        inputs=fc,
+                        units=3,
+                        kernel_initializer=tf.contrib.layers.
+                        xavier_initializer(),
+                        activation=None,
+                        name='logits'
                     )
                 with tf.name_scope('activation'):
-                    self.action_distribution = tf.nn.softmax(fc_three)
+                    self.action_distribution = tf.nn.softmax(logits)
                 with tf.name_scope('loss'):
                     neg_log_probs = tf.nn.softmax_cross_entropy_with_logits_v2(
-                        logits=fc_three,
+                        logits=logits,
                         labels=self.actions
                     )
                     self.loss = tf.reduce_mean(
@@ -217,7 +271,7 @@ class DoomDDdqN:
             sess.run(tf.compat.v1.global_variables_initializer())
             while epoch < n_epochs + 1:
                 batches, n_episode = self.create_batches(sess, batch_size)
-                states_b, actions_b, batch_rewards, disc_rewards_b, = batches
+                states_b, actions_b, batch_rewards, disc_rewards_b = batches
                 summed_batch_rws = np.sum(batch_rewards)
 
                 total_rewards.append(summed_batch_rws)
@@ -250,6 +304,7 @@ class DoomDDdqN:
                                   output=batches_, forward=False,
                                   episode=epoch)
                 self.save(sess, epoch)
+                epoch += 1
 
     def feed_forward(self, sess, inputs=[], output={}, **kwargs):
         """
@@ -326,9 +381,9 @@ class DoomDDdqN:
             done = self.game.is_episode_finished()
 
             if done:
-                next_states = np.zeros(resolution, dtype=np.int)
-                next_states, stacked_frames = stack_frames(
-                    next_states, stacked_frames)
+                next_state = np.zeros(resolution, dtype=np.int)
+                next_state, stacked_frames = stack_frames(
+                    next_state, stacked_frames)
                 batch_rewards += [episode_rewards]
 
                 disc_rewards.append(
@@ -343,7 +398,7 @@ class DoomDDdqN:
                                                      new_episode=True)
             else:
                 next_state = self.game.get_state().screen_buffer
-                next_state, stacked_frames = stack_frames(next_states,
+                next_state, stacked_frames = stack_frames(next_state,
                                                           stacked_frames)
                 state = next_state
         return (np.stack(np.array(states)),
@@ -390,3 +445,8 @@ class DoomDDdqN:
                       f'score: {game.get_total_reward()}'
                       )
             game.close()
+
+
+if __name__ == '__main__':
+    game = DoomPG()
+    game.train()
