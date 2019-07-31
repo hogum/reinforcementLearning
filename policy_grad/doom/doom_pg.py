@@ -14,7 +14,7 @@ import vizdoom as vz
 from skimage import transform
 
 
-resolution = (84, 84)
+resolution = (100, 160)
 stack_size = 4
 
 STACKED_FRAMES_ = deque(
@@ -29,8 +29,8 @@ def create_env(visible=False):
     path = '/usr/local/lib/python3.7/dist-packages/vizdoom/scenarios/'
 
     doom = vz.DoomGame()
-    doom.load_config(os.path.join(path, 'health_gathering.cfg'))
-    doom.set_doom_scenario_path(os.path.join(path, 'health_gathering.wad'))
+    doom.load_config(os.path.join(path, 'defend_the_center.cfg'))
+    doom.set_doom_scenario_path(os.path.join(path, 'defend_the_center.wad'))
 
     doom.set_window_visible(visible)
     doom.init()
@@ -45,7 +45,7 @@ def preprocess_frame(frame):
         Preprocess the screen buffer for reduced training time
     """
     try:
-        frame = np.array(frame[0] + frame[1] + frame[2])[80:, :]
+        frame = np.array(frame[0] + frame[1] + frame[2])[40:, :]
 
     except IndexError:
         frame = frame
@@ -104,7 +104,6 @@ class DoomPG:
     """
     lr: int = 0.0002
     gamma: float = 0.99
-    memory_size: int = 100000
     name: str = 'DoomPG'
     state_size: list = field(default_factory=get_state_size)
     action_size = 3  # Left, Right, move Forward
@@ -251,7 +250,7 @@ class DoomPG:
             Sets up the tensorboard writer
         """
         self.writer = tf.compat.v1.summary.FileWriter(
-            '/root/tensorboard/policy_g/doom/2')
+            '/root/tensorboard/policy_g/doom/defend')
         tf.compat.v1.summary.scalar('Loss', self.loss)
         tf.compat.v1.summary.scalar('reward_mean', self.mean_reward)
         self.writer_op = tf.compat.v1.summary.merge_all()
@@ -341,12 +340,12 @@ class DoomPG:
         self.writer.add_summary(summary, episode)
         self.writer.flush()
 
-    def save(self, sess, epoch, interval=10):
+    def save(self, sess, epoch, interval=2):
         """
             Saves the model checkpoints
         """
         if not epoch % interval:
-            self.saver.save(sess, '.models/doom_pg.ckpt')
+            self.saver.save(sess, '.models/defend/doom_pg.ckpt')
 
     def create_batches(self, sess, batch_size):
         """
@@ -414,7 +413,7 @@ class DoomPG:
         """
         with tf.compat.v1.Session() as sess:
             game, actions_choice = create_env(visible=True)
-            self.saver.restore(sess, '.models/doom_pg.ckpt')
+            self.saver.restore(sess, '.models/defend/doom_pg.ckpt')
 
             for episode in range(episodes):
                 game.new_episode()
@@ -450,6 +449,6 @@ class DoomPG:
 
 
 if __name__ == '__main__':
-    game = DoomPG()
-    game.train(training=False)
+    game = DoomPG(lr=.0001, gamma=.95)
+    game.train(n_epochs=30000, training=True)
     game.play(episodes=20)
