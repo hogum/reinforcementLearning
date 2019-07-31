@@ -1,0 +1,2 @@
+model_checkpoint_path: "doom_pg.ckpt"
+all_model_checkpoint_paths: "doom_pg.ckpt"

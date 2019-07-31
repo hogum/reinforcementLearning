@@ -251,7 +251,7 @@ class DoomPG:
             Sets up the tensorboard writer
         """
         self.writer = tf.compat.v1.summary.FileWriter(
-            '/root/tensorboard/policy_g/doom/1')
+            '/root/tensorboard/policy_g/doom/2')
         tf.compat.v1.summary.scalar('Loss', self.loss)
         tf.compat.v1.summary.scalar('reward_mean', self.mean_reward)
         self.writer_op = tf.compat.v1.summary.merge_all()
@@ -261,7 +261,7 @@ class DoomPG:
         """
             Trains the agent
         """
-        summed_rewards, epoch = 0, 1
+        epoch = 1
         total_rewards, mean_rewards,  = [], []
 
         if not training:
@@ -284,7 +284,7 @@ class DoomPG:
 
                 print(f'\n\nEpoch {epoch}\n\n' +
                       f'training episodes: {n_episode} ' +
-                      f'reward: {summed_rewards} ' +
+                      f'reward: {summed_batch_rws} ' +
                       f'mean r: {batch_mean} ' +
                       f'max r: {max_batch_rw} ' +
                       f'average tr: {av_training_rewd}' +
@@ -373,7 +373,7 @@ class DoomPG:
                 range(action_prob.shape[1]),
                 p=action_prob.ravel()
             )
-            action = self.actions_choice[action]
+            action = self.actions_choice[action].tolist()
             reward = self.game.make_action(action)
             states += [state]
             actions += [action]
@@ -392,7 +392,9 @@ class DoomPG:
                     break
 
                 episode_rewards.clear()
+                self.game.new_episode()
                 episode += 1
+                self.game.new_episode()
                 state = self.game.get_state().screen_buffer
                 state, stacked_frames = stack_frames(state,
                                                      new_episode=True)
@@ -401,8 +403,8 @@ class DoomPG:
                 next_state, stacked_frames = stack_frames(next_state,
                                                           stacked_frames)
                 state = next_state
-        return (np.stack(np.array(states)),
-                np.stack(np.array(actions)),
+        return (np.stack(np.asarray(states)),
+                np.stack(np.asarray(actions)),
                 np.concatenate(batch_rewards),
                 np.concatenate(disc_rewards)), episode
 
@@ -411,7 +413,7 @@ class DoomPG:
             Plays trained agent
         """
         with tf.compat.v1.Session() as sess:
-            game, actions_choice = create_env()
+            game, actions_choice = create_env(visible=True)
             self.saver.restore(sess, '.models/doom_pg.ckpt')
 
             for episode in range(episodes):
@@ -429,7 +431,7 @@ class DoomPG:
                     action = np.random.choice(
                         range(action_probability.shape[1]),
                         p=action_probability.ravel())
-                    action = actions_choice[action]
+                    action = actions_choice[action].tolist()
 
                     game.make_action(action)
                     done = game.is_episode_finished()
@@ -441,7 +443,7 @@ class DoomPG:
                         state = next_state
                     else:
                         break
-                print(f'Episode{episode} ' +
+                print(f'Episode {episode} ' +
                       f'score: {game.get_total_reward()}'
                       )
             game.close()
@@ -449,4 +451,5 @@ class DoomPG:
 
 if __name__ == '__main__':
     game = DoomPG()
-    game.train()
+    game.train(training=False)
+    game.play(episodes=20)
