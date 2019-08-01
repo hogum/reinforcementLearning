@@ -3,7 +3,7 @@
 """
 import tensorflow as tf
 
-from utils import mse
+from .utils import mse, find_trainable_vars
 
 
 class Model:
