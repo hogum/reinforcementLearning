@@ -1,40 +1,36 @@
 """
     Holds the model
 """
-from dataclasses import dataclass
-from typing import Any
-
 import tensorflow as tf
 
 from utils import mse
 
 
-@dataclass
 class Model:
     """
         Creates the step and the training  model
+
+        - save/load:  Saves/Loads the Model
+        - train: Trains the model
+                - Feed forward and retropropagates gradients
     """
-    policy: Any
-    obsv_space: Any
-    action_space: Any
-    n_steps: Any
-    n_envs: Any
-    vf_coef: Any
-    ent_coef: Any
-    max_grad_norm: Any
 
-    def __post_init__(self):
-        self.build_model()
+    def __init__(self, policy,
+                 obsv_space,
+                 action_space,
+                 n_steps,
+                 n_envs,
+                 vf_coef,
+                 ent_coef,
+                 max_grad_norm
+                 ):
 
-    def build_model(self):
-        """
-            Creates the model
-        """
         sess = tf.get_default_session()
-        actions = tf.compat.v1.placeholder(tf.int, [None], name='actions')
+        actions = tf.compat.v1.placeholder(tf.int32, [None], name='actions')
         advantages = tf.compat.v1.placeholder(
             tf.float32, [None], name='advantages')
-        rewards = tf.compat.v1.placeholder(tf.float32, (None), name='rewards')
+        rewards = tf.compat.v1.placeholder(
+            tf.float32, (None), name='rewards')
         lr = tf.compat.v1.placeholder(tf.float32, name='learning_rate')
 
         step_model = policy(sess, obsv_space, action_space,
@@ -67,28 +63,54 @@ class Model:
         if max_grad_norm is not None:
             # clip grads [Noramalize]
             grads, grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        grads = list(zip(grads, params)
+        grads = list(zip(grads, params))
 
-        optimizer=tf.train.RMSPropOptimizer(learning_rate=lr,
-            decay_rate=.99,
+        optimizer = tf.train.RMSPropOptimizer(
+            learning_rate=lr,
+            decay=.99,
             epsilon=1e-5)
-        train_=optimizer.apply_gradients(grads)
+        train_ = optimizer.apply_gradients(grads)
 
-    def save(self):
-        """
-            Saves the Model
-        """
-        pass
+        def save(path):
+            """
+                Saves Model
+            """
+            saver = tf.train.Saver()
+            saver.save(sess, path)
 
-    def train(self):
-        """
-            Trains the model
-            - Feed forward and retropropagates gradients
-        """
-        pass
+        def train(states, actions_in, returns, values, l_r):
+            """
+                Trains the model
+            """
+            # Calculate adavantage A(s, a) = R + yV(s') - V(s)
+            # returns = R + yV(s')
+            advantages_ = returns - values
 
-    def load(self):
-        """
-            Loads the saved model
-        """
-        pass
+            td_map = {train_model.inputs: states,
+                      actions: actions_in,
+                      advantages: advantages_,
+                      rewards: returns,
+                      lr: l_r}
+
+            policy_loss, value_loss, policy_entropy, _ = sess.run(
+                [pg_loss, vf_loss, entropy, train_],
+                td_map
+            )
+            return policy_loss, value_loss, policy_entropy
+
+        def load(path):
+            """
+                Loads saved model
+            """
+            saver = tf.train.Saver()
+            saver.restore(sess, path)
+
+        self.train = train
+        self.train_model = train_model
+        self.step_model = step_model
+        self.save = save
+        self.load = load
+        self.initial_state = step_model.initial_state
+        self.value = step_model.value
+        self.step = step_model.step
+        tf.global_variables_initializer().run(session=sess)
