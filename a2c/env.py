@@ -4,7 +4,6 @@ import gym
 import cv2
 from baselines.common.atari_wrappers import FrameStack
 
-from retro import make
 from retro_contest.local import make as make_local
 
 cv2.ocl.setUseOpenCL(False)  # No GPU use
@@ -64,13 +63,52 @@ class ActionDiscretizer(gym.ActionWrapper):
             for button in action:
                 arr[buttons.index(button)] = True
             self.actions_.append(arr)
-        self.action_space = gym.spaces.Discreet(len(self.actions_))
+        self.action_space = gym.spaces.Discrete(len(self.actions_))
 
     def action(self, a_id):
         """
             Retrieves an action
         """
         return self.actions_[a_id].copy()
+
+
+class RewardScaler(gym.RewardWrapper):
+    """
+        Rescales the rewards for PPO.
+        Effects Perfomance
+    """
+
+    def reward(self, reward):
+        return reward * 0.01
+
+
+class AllowBackTracking(gym.Wrapper):
+    """
+        Use deltas in max(X) rather than deltas in X
+        Agents are not discouraged heavily from
+        exploring backwards if there is no way to
+        advance forward directly.
+    """
+
+    def __init__(self, env):
+        super(AllowBackTracking, self).__init__(env)
+        self._cur_x = 0
+        self._max_x = 0
+
+    def reset(self, **kwargs):
+        self._cur_x = 0
+        self._max_x = 0
+
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        self._cur_x += reward
+
+        reward = max(0, self._cur_x - self._max_x)
+        self._max_x = max(self._cur_x, self._max_x)
+
+        return obs, reward, done, info
 
 
 def create_env(env_idx):
