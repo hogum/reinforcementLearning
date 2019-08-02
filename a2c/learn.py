@@ -1,9 +1,13 @@
-import numpy as np
-
-from baselines import logger
+"""
+    Create models and train
+"""
 
 import time
 import os
+
+import numpy as np
+
+from baselines import logger
 
 from .a2_c import Model
 from .runner import Runner
@@ -20,11 +24,30 @@ def play(policy, env):
     model = Model(policy=policy,
                   obsv_space=obs_space,
                   action_space=action_space,
-                  n_steps=n_steps,
-                  n_envs=n_envs,
-                  vf_coeff=vf_coeff,
-                  ent_coeff=ent_coeff,
-                  max_grad_norm=max_grad_norm)
+                  n_steps=1,
+                  n_envs=1,
+                  vf_coef=0,
+                  ent_coef=0,
+                  max_grad_norm=0)
+    load_path = '.model/260/model.ckpt'
+    model.load(load_path)
+
+    obsv = env.reset()
+
+    score, boom = 0, 0
+    done = False
+
+    while not done:
+        boom += 1
+
+        actions, _ = model.step(obsv)
+        obsv, rewards, done, _ = env.step(actions)
+
+        score += rewards
+
+        env.render()
+    print('Score: {score}')
+    env.close()
 
 
 def learn(policy, env, n_steps, total_timesteps, gamma, lam, **kwargs):

@@ -83,4 +83,4 @@ class Runner(AbstractEnvRunner):
 
             mb_returns = mb_advantages + values_mb
 
-            return map(swap_01(obs_mb, actions_mb, mb_returns, values_mb))
+            return map(swap_01, (obs_mb, actions_mb, mb_returns, values_mb))
