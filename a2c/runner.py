@@ -11,7 +11,7 @@ class Runner(AbstractEnvRunner):
 
     """
 
-    def __init__(self, env, model, n_steps, total_timestamps, gamma, lam):
+    def __init__(self, env, model, n_steps, total_timesteps, gamma, lam):
         super().__init__(env=env, model=model, nsteps=n_steps)
         self.gamma = gamma
 
@@ -19,7 +19,7 @@ class Runner(AbstractEnvRunner):
         self.lam = lam
 
         # Total timestamps taken
-        self.total_timestamps = total_timestamps
+        self.total_timesteps = total_timesteps
 
     def run(self):
         """
