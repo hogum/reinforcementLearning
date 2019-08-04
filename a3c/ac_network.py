@@ -2,6 +2,7 @@
     AC Network class
 """
 import tensorflow as tf
+import numpy as np
 
 resolution = (84, 84)
 
@@ -22,8 +23,7 @@ class AC_Network:
                                              filters=64,
                                              kernel_size=(8, 8),
                                              strides=(4, 4),
-                                             activation_fn=tf.nn.elu,
-                                             num_outputs=16,
+                                             activation=tf.nn.elu,
                                              padding='valid',
                                              name='conv1'
                                              )
@@ -32,10 +32,38 @@ class AC_Network:
                                              kernel_size=(4, 4),
                                              strides=(2, 2),
                                              padding='valid',
-                                             activation_fn=tf.nn.elu,
+                                             activation=tf.nn.elu,
                                              name='conv2'
                                              )
-            hidden = tf.contrib.layers.fully_connected(tf.layers.flatten(self.conv_two),
-                                                       units=256,
-                                                       activation_fn=tf.nn.elu
-                                                       )
+            hidden = tf.contrib.layers.fully_connected(
+                tf.layers.flatten(self.conv_two),
+                units=256,
+                activation_fn=tf.nn.elu
+            )
+            lstm_cell = tf.keras.layers.LSTMCell(units=256)
+            c_ = np.zeros((1, lstm_cell.state_size[0]), np.float32)
+            h_ = np.zeros((1, lstm_state_size[1]), np.float32)
+            self.state_ = [c_, h_]
+
+            c_in = tf.compat.v1.placeholder(dtype=tf.float32,
+                                            shape=(1, lstm_cell.state_size[0]),
+                                            name='c_hidden_state')
+            h_in = tf.compat.v1.placeholder(dtype=tf.float32,
+                                            shape=(1, lstm_cell.state_size[1]),
+                                            name='h_output')
+            self.state_in = [c_in, h_in]
+
+            rnn_in = tf.expand_dims(hidden, [0])
+            step_size = tf.shape(self.image_in)[:1]
+            state_in = tf.nn.rnn_cell.LSTMStateTuple(c_in, h_in)
+            lstm_outputs, lstm_states = tf.keras.layers.RNN(
+                # tf.nn.dynamic_nn
+                cell=lstm_cell,
+                sequence_length=step_size,
+                time_major=False,
+                initial_state=state_in,
+                inputs=rnn_in
+            )
+            lstm_c, lstm_h = lstm_states
+            self.state_out = lstm_outputs[:1, :], lstm_h[:1, :]
+            rnn_out = tf.reshape(lstm_outputs, (-1, 256))
