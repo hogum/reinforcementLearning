@@ -8,7 +8,10 @@ from skimage import transform
 import numpy as np
 import tensorflow as tf
 
+from scipy import signal
+
 import vizdoom as vz
+
 
 resolution = (84, 84)
 stack_size = 1
@@ -68,3 +71,10 @@ def update_target_graph(from_scope, worker_name):
     ops = [(to_var.assign(from_var))
            for from_var, to_var in zip(from_vars, to_vars)]
     return ops
+
+
+def preprocess_rewards(rewards, gamma):
+    """
+        Returns discounted rewards
+    """
+    return signal.lfilter([1], [1, -gamma], rewards[::-1], axis=0)[::-1]
