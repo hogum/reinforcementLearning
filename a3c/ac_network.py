@@ -82,3 +82,51 @@ class AC_Network:
                 weights_initializer=tf.initializers.glorot_uniform(),
                 biases_iniitalizer=None
             )
+            # Back propagate for target network only
+            if name != 'global':
+                self.create_grad_ops(name, trainer)
+
+    def create_grad_ops(self, scope, optimizer):
+        """
+            Creates loss function and gradient update ops
+            for the Worker network
+        """
+        self.actions = tf.compat.v1.placeholder(shape=(None), dtype=tf.int32)
+        self.actions_one_hot = tf.one_hot(
+            indices=self.actions,
+            depth=self.action_size,
+            dtype=tf.float32)
+        self.target_v = tf.compat.v1.placeholder(
+            shape=(None), dtype=tf.float32)
+        self.advatanges = tf.compat.v1.placeholder(
+            shape=(None), dtype=tf.float32)
+
+        self.outputs = tf.reduce_sum(self.policy * self.actions_one_hot,
+                                     axis=1)
+
+        # Loss functions
+        self.value_loss = .5 * tf.reduce_sum(
+            tf.square(
+                self.target_v - tf.reshape(self.value, (-1))
+            )
+        )
+        self.entropy = -tf.reduce_sum(self.policy * tf.log(self.policy))
+        self.policy_loss = - tf.reduce_sum(
+            tf.log(self.outputs) * self.advatanges
+        )
+        self.loss = .5 * self.value_loss + \
+                self.policy_loss - self.entropy * 0.01
+
+        # gradients
+        local_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
+                                       scope=scope)
+        self.grads = tf.gradients(self.loss, self.local_vars)
+        self.var_norms = tf.global_norm(local_vars)
+        grads, self.grad_norms = tf.clip_by_global_norm(self.grads, 40.)
+
+        # apply gradient to network
+        global_vars = tf.get_collection(
+            tf.GraphKeys.TRAINABLE_VARIABLES, scope='global')
+        self.apply_grads = optimizer.apply_gradients(
+            zip(grads, global_vars)
+        )
