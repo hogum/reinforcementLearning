@@ -42,7 +42,7 @@ class AC_Network:
             )
             lstm_cell = tf.keras.layers.LSTMCell(units=256)
             c_ = np.zeros((1, lstm_cell.state_size[0]), np.float32)
-            h_ = np.zeros((1, lstm_state_size[1]), np.float32)
+            h_ = np.zeros((1, lstm_cell._state_size[1]), np.float32)
             self.state_ = [c_, h_]
 
             c_in = tf.compat.v1.placeholder(dtype=tf.float32,
@@ -67,3 +67,18 @@ class AC_Network:
             lstm_c, lstm_h = lstm_states
             self.state_out = lstm_outputs[:1, :], lstm_h[:1, :]
             rnn_out = tf.reshape(lstm_outputs, (-1, 256))
+
+            self.policy = tf.contrib.layers.fully_connected(
+                inputs=rnn_out,
+                num_outputs=action_size,
+                activation_fn=tf.nn.softmax,
+                weights_initializer=tf.initializers.glorot_uniform(),
+                biases_iniitalizer=None
+            )
+            self.value = tf.contrib.layers.fully_connected(
+                inputs=rnn_out,
+                num_outputs=1,
+                activation_fn=None,
+                weights_initializer=tf.initializers.glorot_uniform(),
+                biases_iniitalizer=None
+            )
