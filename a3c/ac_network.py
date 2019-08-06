@@ -12,8 +12,8 @@ class AC_Network:
         Holds operations to create Actor Critic Networks
     """
 
-    def __init__(self, state_size, action_size, trainer, name='Ac_net'):
-        with tf.variable_scope(name):
+    def __init__(self, state_size, action_size, trainer=None, name='Ac_net'):
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             self.inputs = tf.compat.v1.placeholder(dtype=tf.float32,
                                                    shape=(None, state_size),
                                                    name='inputs'
@@ -25,7 +25,7 @@ class AC_Network:
                                              strides=(4, 4),
                                              activation=tf.nn.elu,
                                              padding='valid',
-                                             name='conv1'
+                                             name='conv_one'
                                              )
             self.conv_two = tf.layers.conv2d(inputs=self.conv_one,
                                              filters=128,
@@ -37,7 +37,7 @@ class AC_Network:
                                              )
             hidden = tf.contrib.layers.fully_connected(
                 tf.layers.flatten(self.conv_two),
-                units=256,
+                num_outputs=256,
                 activation_fn=tf.nn.elu
             )
             lstm_cell = tf.keras.layers.LSTMCell(units=256)
@@ -53,7 +53,7 @@ class AC_Network:
                                             name='h_output')
             self.state_in = [c_in, h_in]
 
-            rnn_in = tf.expand_dims(hidden, [0])
+            rnn_in = tf.expand_dims(hidden, axis=0)
             step_size = tf.shape(self.image_in)[:1]
             state_in = tf.nn.rnn_cell.LSTMStateTuple(c_in, h_in)
             lstm_outputs, lstm_states = tf.keras.layers.RNN(

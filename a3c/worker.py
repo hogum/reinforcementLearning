@@ -4,10 +4,10 @@
 import tensorflow as tf
 import numpy as np
 
-from .helpers import (create_env, get_state_size,
-                      update_target_graph, preprocess_rewards,
-                      preprocess_frame, create_gifs)
-from .ac_network import AC_Network
+from helpers import (create_env, get_state_size,
+                     update_target_graph, preprocess_rewards,
+                     preprocess_frame, create_gifs)
+from ac_network import AC_Network
 
 
 class Worker:
@@ -103,13 +103,14 @@ class Worker:
                 entr_loss / len_rout,
                 grad_norms, var_norms)
 
-    def work(self, sess, max_eps_len, global_ac, coord, buff_size=30):
+    def work(self, sess, max_eps_len, coord, buff_size=30, saver=None):
         """
             Interacts with the agent's own copy of environment
             to collect experience
         """
         n_episode = sess.run(self.global_eps)
         steps = 0
+        self.saver = saver if saver else self.saver
 
         print(f'Starting worker {self.number}')
 

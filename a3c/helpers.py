@@ -45,8 +45,8 @@ def create_env(visible=False, scene=''):
     scene = 'defend_the_center' if not scene else scene
 
     doom = vz.DoomGame()
-    doom.load_config(os.path.join(path, '{scene}.cfg'))
-    doom.set_doom_scenario_path(os.path.join(path, '{scene}.wad'))
+    doom.load_config(os.path.join(path, f'{scene}.cfg'))
+    doom.set_doom_scenario_path(os.path.join(path, f'{scene}.wad'))
 
     doom.set_window_visible(visible)
     doom.init()
