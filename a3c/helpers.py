@@ -81,3 +81,7 @@ def preprocess_rewards(rewards, gamma):
         Returns discounted rewards
     """
     return signal.lfilter([1], [1, -gamma], rewards[::-1], axis=0)[::-1]
+
+
+def create_gifs(frames, path, duration, true_image=True, salient=True):
+    pass

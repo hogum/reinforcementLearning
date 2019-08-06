@@ -6,7 +6,7 @@ import numpy as np
 
 from .helpers import (create_env, get_state_size,
                       update_target_graph, preprocess_rewards,
-                      preprocess_frame)
+                      preprocess_frame, create_gifs)
 from .ac_network import AC_Network
 
 
@@ -17,7 +17,7 @@ class Worker:
     """
 
     def __init__(self, agent_number, optimizer, save_path, gamma=2e-4,
-                 episodes=50):
+                 episodes=None):
         self.number = agent_number
         self.name = f'agent {agent_number}'
         self.save_path = save_path
@@ -30,10 +30,13 @@ class Worker:
 
         self.game, self.actions = create_env()
         self.action_size = self.actions.shape[0]
-        self.state_size = get_state_size()
+        self.state_size = np.prod(get_state_size())  # [84, 84, 1]
 
         self.setup_writer()
         self.create_net(optimizer)
+
+        self.first_worker = True if self.name == 'agent 0' else False
+        self.increament = self.global_eps.assign_add(1)
 
     def create_net(self, optimizer):
         """
@@ -60,7 +63,6 @@ class Worker:
         states = roll_out[:, 0]
         actions = roll_out[:, 1]
         rewards = roll_out[:, 2]
-        next_states = roll_out[:, 3]
         values = roll_out[:, 5]
 
         # Find advantage and discounted returns from rewards
@@ -82,7 +84,7 @@ class Worker:
             self.local_ac.state_in[0]: self.batch_rnn_state[0],
             self.local_ac.state_in[1]: self.batch_rnn_state[1],
         }
-        *losses_n_norms, self.batch_rnn_state, _ = sess.run(
+        * losses_n_norms, self.batch_rnn_state, _ = sess.run(
             fecthes=[self.local_ac.value_loss,
                      self.local_ac.policy_loss,
                      self.local_ac.entropy,
@@ -162,7 +164,8 @@ class Worker:
 
                     state = next_state
 
-                    if len(episode_buffer) >= buff_size and not done:
+                    checks = [done, n_episode >= max_eps_len]
+                    if len(episode_buffer) >= buff_size and not any(checks):
                         # Update step using experience mini batch
                         # Bootstrap final return from current value etimation
                         value_1 = sess.run(
@@ -172,27 +175,80 @@ class Worker:
                                 self.local_ac.state_in[0]: rnn_state[0],
                                 self.local_ac.state_[1]: rnn_state[1],
                             })[0, 0]
-                        *losses, grad_norm, var_norm = self.train(
+                        * losses, grad_norm, var_norm = self.train(
                             sess, episode_buffer, value_1)
                         episode_buffer.clear()
                         sess.run(self.updated_ops)
                     if done:
                         break
+                self.episode_rewards.append(episode_reward)
+                self.episode_len.append(episode_step)
+                self.reward_mean.append(np.mean(episode_values))
+
+                if episode_buffer:  # Update network at end of episode
+                    *losses, grad_norm, var_norm = self.train(
+                        sess, episode_buffer, 0.)
+                self.save(sess, n_episode,
+                          outputs=(losses, (grad_norm, var_norm)),
+                          frames=episode_frames)
+                if self.first_worker:
+                    sess.run(self.increament)
+                n_episode += 1
 
     def setup_writer(self):
         """
             Sets up the tensorboard writer
         """
         self.writer = tf.compat.v1.summary.FileWriter(
-            '/root/tensorboard/a3c/doom/1')
+            f'/root/tensorboard/a3c/{self.number}')
         tf.compat.v1.summary.scalar('Loss', self.local_ac.loss)
         tf.compat.v1.summary.scalar('reward_mean', self.reward_mean)
         self.writer_op = tf.compat.v1.summary.merge_all()
         self.saver = tf.train.Saver()
 
-    def save(self, sess, episode, interval=5):
+    def save(self, sess, episode, interval=5, frame_intv=20, **kwargs):
         """
             Saves model checkpoints
         """
+        outputs = kwargs.get('outputs')
+        frames = kwargs.get('frames')
+
         if not episode % interval:
-            self.saver.save(sess, '.models/doom/model.ckpt')
+            if self.name == 'agent 0' and not episode % frame_intv:
+                time_per_step = .05
+                images = np.asanyarray(frames)
+                create_gifs(images, f'.frames/image_{episode}.gif',
+                            duration=len(images)*time_per_step,
+                            true_image=True,
+                            salient=False)
+            self.saver.save(sess, self.save_path + f'/model-{episode}.ckpt')
+            print('model saved')
+            self.summarize(episode, outputs)
+
+    def summarize(self, episode, outputs):
+        """
+            Writes tf summaries
+        """
+        losses, norms = outputs
+        value_loss, policy_loss, entr_loss = losses
+        grad_norm, var_norm = norms
+
+        reward_mean = np.mean(self.episode_rewards[-5:])
+        mean_len = np.mean(self.episode_len[-5:])
+        mean_value = np.mean(self.reward_mean[-5:])
+
+        summary = tf.Summary()
+        summary.value.add(tag='loss/value', simple_value=float(value_loss))
+        summary.value.add(tag='loss/policy', simple_value=float(policy_loss))
+        summary.value.add(tag='loss/entropy', simple_value=float(entr_loss))
+        summary.value.add(tag='loss/grad_norm', simple_value=float(grad_norm))
+        summary.value.add(tag='loss/var_norm', simple_value=float(var_norm))
+
+        summary.value.add(tag='performance/reward',
+                          simple_value=float(reward_mean))
+        summary.value.add(tag='performance/len', simple_value=float(mean_len))
+        summary.value.add(tag='performance/value',
+                          simple_value=float(mean_value))
+
+        self.writer.add_summary(summary, episode)
+        self.writer.flush()
