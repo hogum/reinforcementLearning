@@ -5,7 +5,8 @@ import tensorflow as tf
 import numpy as np
 
 from .helpers import (create_env, get_state_size,
-                      update_target_graph, preprocess_rewards)
+                      update_target_graph, preprocess_rewards,
+                      preprocess_frame)
 from .ac_network import AC_Network
 
 
@@ -91,9 +92,92 @@ class Worker:
                      self.local_ac.apply_grads
                      ],
             feed_dict=feed_dict)
-        value_loss, policy_loss, entr_loss, grad_norms, var_norms = losses_n_norms
+        value_loss, policy_loss, entr_loss, \
+            grad_norms, var_norms = losses_n_norms
         len_rout = len(roll_out)
-        return value_loss / len_rout, policy_loss / len_rout, entr_loss / len_rout, grad_norms, var_norms
+
+        return (value_loss / len_rout,
+                policy_loss / len_rout,
+                entr_loss / len_rout,
+                grad_norms, var_norms)
+
+    def work(self, sess, max_eps_len, global_ac, coord, buff_size=30):
+        """
+            Interacts with the agent's own copy of environment
+            to collect experience
+        """
+        n_episode = sess.run(self.global_eps)
+        steps = 0
+
+        print(f'Starting worker {self.number}')
+
+        with sess.as_default(), sess.graph.as_default():
+            while not coord.should_stop():
+                sess.run(self.updated_ops)
+                episode_buffer, episode_values, episode_frames = [], [], []
+                episode_reward, episode_step, = 0, 0
+
+                self.game.new_episode()
+                done = self.game.is_episode_finished()
+                state = self.game.get_state().screen_buffer
+                episode_frames += [state]
+                state = preprocess_frame(state)
+
+                rnn_state = self.local_ac.state_in
+                self.batch_rnn_state = rnn_state
+
+                while not self.game.is_episode_finished():
+                    # Take action using probabilities from policy net output
+                    a_distribution, value, rnn_state = sess.run(
+                        [self.local_ac.policy,
+                         self.local_ac.value,
+                         self.local_ac.state_out],
+                        feed_dict={self.local_ac.inputs: [state],
+                                   self.local_ac.state_in[0]: rnn_state[0],
+                                   self.local_ac.state_in[1]: rnn_state[1]
+                                   }
+                    )
+                    action = np.random.choice(
+                        a_distribution[0], p=a_distribution[0])
+                    action = np.argmax(a_distribution == action)
+
+                    reward = self.game.make_action(
+                        self.actions[action].tolist()) / 100
+                    done = self.game.is_episode_finished()
+
+                    if not done:
+                        next_state = self.game.get_state().screen_buffer
+                        episode_frames += [next_state]
+                        next_state = preprocess_frame(next_state)
+                    else:
+                        next_state = state
+
+                    episode_buffer.append([state, action,
+                                           reward, next_state,
+                                           done, value[0, 0]])
+                    episode_values += [value[0, 0]]
+                    episode_reward += reward
+                    steps += 1
+                    episode_step += 1
+
+                    state = next_state
+
+                    if len(episode_buffer) >= buff_size and not done:
+                        # Update step using experience mini batch
+                        # Bootstrap final return from current value etimation
+                        value_1 = sess.run(
+                            self.local_ac.value,
+                            feed_dict={
+                                self.local_ac.inputs: [state],
+                                self.local_ac.state_in[0]: rnn_state[0],
+                                self.local_ac.state_[1]: rnn_state[1],
+                            })[0, 0]
+                        *losses, grad_norm, var_norm = self.train(
+                            sess, episode_buffer, value_1)
+                        episode_buffer.clear()
+                        sess.run(self.updated_ops)
+                    if done:
+                        break
 
     def setup_writer(self):
         """

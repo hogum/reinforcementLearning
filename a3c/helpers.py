@@ -4,7 +4,7 @@
 
 import os
 
-from skimage import transform
+from skimage import transform, color
 import numpy as np
 import tensorflow as tf
 
@@ -23,10 +23,13 @@ def preprocess_frame(frame):
         : crops, resizes, normalizes image
     """
     try:
-        frame = (frame[0] + frame[1] + frame[2])[10:-10, 30:-30]
+        # This is funny. Need to find out effect of summing RGB channels
+        # frame = (frame[0] + frame[1] + frame[2])[10:-10, 30:-30]
+        frame = frame[0][10:-10, 30:-30]
 
     except IndexError:
         frame = frame[10:-10, 30:-30]
+    frame = color.rgb2gray(frame)
     frame = transform.resize(frame, resolution)
     frame = np.reshape(frame, [np.prod(frame.shape)]) / 255.
 
