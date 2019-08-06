@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 
 from scipy import signal
+import imageio
 
 import vizdoom as vz
 
@@ -83,5 +84,10 @@ def preprocess_rewards(rewards, gamma):
     return signal.lfilter([1], [1, -gamma], rewards[::-1], axis=0)[::-1]
 
 
-def create_gifs(frames, path, duration, true_image=True, salient=True):
-    pass
+def create_gifs(frames, path, **kwargs):
+    """
+        Saves a stack of states as a GIF
+    """
+    with imageio.get_writer(uri=path, mode='I', **kwargs) as im_writer:
+        for frame in frames:
+            im_writer.append_data(frame)
