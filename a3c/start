@@ -4,4 +4,4 @@ from work import Async
 
 if __name__ == '__main__':
     a = Async()
-    # a.work()
+    a.work()

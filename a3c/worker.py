@@ -85,7 +85,7 @@ class Worker:
             self.local_ac.state_in[1]: self.batch_rnn_state[1],
         }
         * losses_n_norms, self.batch_rnn_state, _ = sess.run(
-            fecthes=[self.local_ac.value_loss,
+            fetches=[self.local_ac.value_loss,
                      self.local_ac.policy_loss,
                      self.local_ac.entropy,
                      self.local_ac.grad_norms,
@@ -126,7 +126,7 @@ class Worker:
                 episode_frames += [state]
                 state = preprocess_frame(state)
 
-                rnn_state = self.local_ac.state_in
+                rnn_state = self.local_ac.state_
                 self.batch_rnn_state = rnn_state
 
                 while not self.game.is_episode_finished():
@@ -174,7 +174,7 @@ class Worker:
                             feed_dict={
                                 self.local_ac.inputs: [state],
                                 self.local_ac.state_in[0]: rnn_state[0],
-                                self.local_ac.state_[1]: rnn_state[1],
+                                self.local_ac.state_in[1]: rnn_state[1]
                             })[0, 0]
                         * losses, grad_norm, var_norm = self.train(
                             sess, episode_buffer, value_1)
@@ -215,7 +215,7 @@ class Worker:
         frames = kwargs.get('frames')
 
         if not episode % interval:
-            if self.name == 'agent 0' and not episode % frame_intv:
+            if self.name == 'agent_0' and not episode % frame_intv:
                 time_per_step = .05
                 images = np.asanyarray(frames)
                 create_gifs(images, f'.frames/image_{episode}.gif',

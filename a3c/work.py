@@ -48,8 +48,9 @@ class Async:
         with tf.Session() as sess:
             coordinator = tf.train.Coordinator()
             saver = tf.train.Saver()
-            if load_model:
-                model = tf.train.get_checkpoint_state('.model')
+            model = tf.train.get_checkpoint_state('.model')
+
+            if load_model and model:
                 saver.restore(sess, model.model_checkpoint_path)
             else:
                 sess.run(tf.global_variables_initializer())

@@ -44,14 +44,13 @@ class AC_Network:
             c_ = np.zeros((1, lstm_cell.state_size[0]), np.float32)
             h_ = np.zeros((1, lstm_cell.state_size[1]), np.float32)
             self.state_ = [c_, h_]
-
             c_in = tf.compat.v1.placeholder(dtype=tf.float32,
                                             shape=(1, lstm_cell.state_size[0]),
                                             name='c_hidden_state')
             h_in = tf.compat.v1.placeholder(dtype=tf.float32,
                                             shape=(1, lstm_cell.state_size[1]),
                                             name='h_output')
-            self.state_in = [c_in, h_in]
+            self.state_in = (c_in, h_in)
 
             rnn_in = tf.expand_dims(hidden, axis=0)
             step_size = tf.shape(self.image_in)[:1]
@@ -65,7 +64,7 @@ class AC_Network:
                 inputs=rnn_in
             )
             lstm_c, lstm_h = lstm_states
-            self.state_out = lstm_outputs[:1, :], lstm_h[:1, :]
+            self.state_out = lstm_c[:1, :], lstm_h[:1, :]
             rnn_out = tf.reshape(lstm_outputs, (-1, 256))
 
             self.policy = tf.contrib.layers.fully_connected(
