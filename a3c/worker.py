@@ -19,7 +19,7 @@ class Worker:
     def __init__(self, agent_number, optimizer, save_path, gamma=2e-4,
                  episodes=None):
         self.number = agent_number
-        self.name = f'agent {agent_number}'
+        self.name = f'agent_{agent_number}'
         self.save_path = save_path
 
         self.gamma = gamma
@@ -32,10 +32,10 @@ class Worker:
         self.action_size = self.actions.shape[0]
         self.state_size = np.prod(get_state_size())  # [84, 84, 1]
 
-        self.setup_writer()
         self.create_net(optimizer)
+        self.setup_writer()
 
-        self.first_worker = True if self.name == 'agent 0' else False
+        self.first_worker = True if self.name == 'agent_0' else False
         self.increament = self.global_eps.assign_add(1)
 
     def create_net(self, optimizer):

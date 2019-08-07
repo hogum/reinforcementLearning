@@ -40,9 +40,9 @@ class AC_Network:
                 num_outputs=256,
                 activation_fn=tf.nn.elu
             )
-            lstm_cell = tf.keras.layers.LSTMCell(units=256)
+            lstm_cell = tf.nn.rnn_cell.LSTMCell(num_units=256)
             c_ = np.zeros((1, lstm_cell.state_size[0]), np.float32)
-            h_ = np.zeros((1, lstm_cell._state_size[1]), np.float32)
+            h_ = np.zeros((1, lstm_cell.state_size[1]), np.float32)
             self.state_ = [c_, h_]
 
             c_in = tf.compat.v1.placeholder(dtype=tf.float32,
@@ -56,8 +56,8 @@ class AC_Network:
             rnn_in = tf.expand_dims(hidden, axis=0)
             step_size = tf.shape(self.image_in)[:1]
             state_in = tf.nn.rnn_cell.LSTMStateTuple(c_in, h_in)
-            lstm_outputs, lstm_states = tf.keras.layers.RNN(
-                # tf.nn.dynamic_nn
+            lstm_outputs, lstm_states = tf.nn.dynamic_rnn(
+                # tf.keras.layers.RNN(
                 cell=lstm_cell,
                 sequence_length=step_size,
                 time_major=False,
@@ -73,14 +73,14 @@ class AC_Network:
                 num_outputs=action_size,
                 activation_fn=tf.nn.softmax,
                 weights_initializer=tf.initializers.glorot_uniform(),
-                biases_iniitalizer=None
+                biases_initializer=None
             )
             self.value = tf.contrib.layers.fully_connected(
                 inputs=rnn_out,
                 num_outputs=1,
                 activation_fn=None,
                 weights_initializer=tf.initializers.glorot_uniform(),
-                biases_iniitalizer=None
+                biases_initializer=None
             )
 
             # Back propagate for target network only
@@ -108,7 +108,7 @@ class AC_Network:
         # Loss functions
         self.value_loss = .5 * tf.reduce_sum(
             tf.square(
-                self.target_v - tf.reshape(self.value, (-1))
+                self.target_v - tf.reshape(self.value, (-1,))
             )
         )
         self.entropy = -tf.reduce_sum(self.policy * tf.log(self.policy))
