@@ -88,6 +88,12 @@ def create_gifs(frames, path, **kwargs):
     """
         Saves a stack of states as a GIF
     """
+    dir_name = os.path.dirname(path)
+
+    if not os.path.exists(dir_name):
+        os.mkdir(dir_name)
+    kwargs.pop('true_image')
+    kwargs.pop('salient')
     with imageio.get_writer(uri=path, mode='I', **kwargs) as im_writer:
         for frame in frames:
-            im_writer.append_data(frame)
+            im_writer.append_data(frame[0])
