@@ -1,5 +1,6 @@
 """
-    Large scale study of curiosity driven learning
+    Simple Implementation of Large scale study of curiosity driven learning in
+    Mountain Car
 """
 import numpy as np
 import tensorflow as tf
@@ -15,13 +16,21 @@ class Curiosity:
     n_states: int
     n_actions: int
     gamma: float = .99
-    lr: float = .99
+    lr: float = 1e-3
+    epsilon: float = .95
     mem_size: float = 1000
     batch_size: float = 128
+    write_graph: bool = True
 
     def __post_init__(self):
+        # [s, a, r, n_s]
         self.memory = np.zeros((self.mem_size, self.n_states * 2 + 2))
-        self.build_model()
+        self.mem_idx = 0
+        self.dyn_opt, self.dqn_opt, self.q, \
+            self.intrsc_rew = self.build_model()
+
+        self.sess = tf.compat.v1.Session()
+        self.setup_replacement()
 
     def build_net(self):
         """
@@ -37,11 +46,13 @@ class Curiosity:
             tf.float32, (None, self.n_states), name='next_states')
 
         # dynamics Net
-        dyn_nxt_states, curiosity, train_opt = self.build_dynamics_net()
+        dyn_nxt_states, curiosity, dyn_opt = self.build_dynamics_net()
 
         # RL model
         total_reward = tf.add(curiosity, self.rewards, name='reward_sum')
         q, dqn_loss, dqn_opt = self.build_dqn(total_reward)
+
+        return dyn_opt, dqn_opt, q, curiosity
 
     def build_dynamics_net(self):
         """
@@ -116,3 +127,49 @@ class Curiosity:
                 tf.GraphKeys.TRAINABLE_VARIABLES, scope='evaluation_net')
         )
         return eval_q, loss, opt
+
+    def setup_replacement(self):
+        """
+            Assigns to target network from the evaluation net
+            and writes logs
+        """
+        eval_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
+                                        scope='evaluation_net')
+        target_params = tf.get_collection(
+            tf.GraphKeys.GLOBAL_VARIABLES, scope='target_net')
+
+        with tf.compat.v1.variable_scope('hard_replacement'):
+            self.target_replace_op = [
+                tf.assign(tg, ev) for tg, ev in zip(
+                    target_params, eval_params)
+            ]
+        if self.write_graph:
+            tf.compat.v1.summary.FileWriter(
+                '/root/tensorboard/curiosity/1', graph=self.sess.graph)
+
+    def chose_action(self, observation):
+        """
+            Returns an action given an observation
+        """
+        state = observation[np.newaxis, :]
+
+        if np.random.uniform() < self.epsilon:
+            # Feed forward the observation and get q value for each action
+            action_value = self.sess.run(
+                self.q, feed_dict={self.states: state})
+            action = np.argmax(action_value)
+        else:
+            action = np.random.randint(0, self.n_actions)
+
+        return action
+
+    def memorize(self, experience):
+        """
+            Stores an experience batch in memory
+        """
+        st, actions, rewards, next_st = experience
+        transition = np.hstack((st, [actions, rewards], next_st))
+        self.mem_idx = 0 if self.mem_idx > self.mem_size else self.mem_idx
+
+        self.memory[self.mem_idx, :] = transition
+        self.mem_idx += 1
