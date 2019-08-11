@@ -18,14 +18,14 @@ class Curiosity:
     gamma: float = .99
     lr: float = 1e-3
     epsilon: float = .95
-    mem_size: float = 1000
-    batch_size: float = 128
+    mem_size: int = 1000
+    target_replace_step: int = 400
     write_graph: bool = True
 
     def __post_init__(self):
         # [s, a, r, n_s]
         self.memory = np.zeros((self.mem_size, self.n_states * 2 + 2))
-        self.mem_idx = 0
+        self.mem_idx, self.step = 0, 0
         self.dyn_opt, self.dqn_opt, self.q, \
             self.intrsc_rew = self.build_model()
 
@@ -173,3 +173,35 @@ class Curiosity:
 
         self.memory[self.mem_idx, :] = transition
         self.mem_idx += 1
+
+    def learn(self, batch_size=128):
+        """
+            Samples experience mini batches to feed
+            the model networks
+        """
+        # Replace target params
+        if not self.step % self.target_replace_step:
+            self.sess.run(self.target_replace_op)
+
+        # sample
+        last_mem_idx = self.mem_idx
+        sample_batch_idx = np.random.choice(last_mem_idx, size=batch_size)
+        sample_batch = self.memory[sample_batch_idx, :]
+
+        states = sample_batch[:, :, self.n_states]
+        actions = sample_batch[:, self.n_states]
+        rewards = sample_batch[:, self.n_states + 1]
+        next_states = sample_batch[:, -self.n_states:]
+
+        feed_inputs = {
+            self.states: states,
+            self.actions: actions,
+            self.rewards: rewards,
+            self.next_states: next_states}
+        self.sess.run(self.dqn_opt, feed_dict=feed_inputs)
+
+        if not self.step % 1000:  # delay training, stay curious
+            feed_inputs.pop(self.rewards)
+            self.sess.run(self.dyn_opt,
+                          feed_dict=feed_inputs)
+        self.step += 1
