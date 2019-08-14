@@ -2,10 +2,14 @@
     Simple Implementation of Large scale study of curiosity driven learning in
     Mountain Car
 """
+from dataclasses import dataclass
+
 import numpy as np
 import tensorflow as tf
 
-from dataclasses import dataclass
+import matplotlib.pyplot as plt
+
+
 @dataclass
 class Curiosity:
     """
@@ -27,7 +31,7 @@ class Curiosity:
         self.memory = np.zeros((self.mem_size, self.n_states * 2 + 2))
         self.mem_idx, self.step = 0, 0
         self.dyn_opt, self.dqn_opt, self.q, \
-            self.intrsc_rew = self.build_model()
+            self.intrsc_rew = self.build_net()
 
         self.sess = tf.compat.v1.Session()
         self.setup_replacement()
@@ -46,26 +50,28 @@ class Curiosity:
             tf.float32, (None, self.n_states), name='next_states')
 
         # dynamics Net
-        dyn_nxt_states, curiosity, dyn_opt = self.build_dynamics_net()
+        dyn_nxt_states, curiosity, dyn_opt = self.build_dynamics_net(
+            self.states, self.actions, self.next_states)
 
         # RL model
         total_reward = tf.add(curiosity, self.rewards, name='reward_sum')
-        q, dqn_loss, dqn_opt = self.build_dqn(total_reward)
+        q, dqn_loss, dqn_opt = self.build_dqn(
+            self.states, self.actions, total_reward, self.next_states)
 
         return dyn_opt, dqn_opt, q, curiosity
 
-    def build_dynamics_net(self):
+    def build_dynamics_net(self, states, actions, next_states):
         """
             Predicts next state
             : loss error between actual state and predicted state
         """
         with tf.compat.v1.variable_scope('dynamic_net'):
             actions = tf.expand_dims(tf.cast(
-                self.actions, dtype=tf.float32, name='actions_float'),
+                actions, dtype=tf.float32, name='actions_float'),
                 name='actions_2d', axis=1)
-            stat_act = tf.concat((self.states, actions),
+            stat_act = tf.concat((states, actions),
                                  axis=1, name='state_actions')
-            encoded_states = self.next_states
+            encoded_states = next_states
             dyn_sa = tf.layers.dense(inputs=stat_act,
                                      units=32,
                                      activation=tf.nn.relu)
@@ -77,19 +83,19 @@ class Curiosity:
                 squared_diff = tf.reduce_sum(           # Intrinsic reward
                     tf.square(encoded_states - dyn_next_states),
                     axis=1)
-            optimizer = tf.train.AdamOptimizer(
+            optimizer = tf.compat.v1.train.AdamOptimizer(
                 self.lr, name='dyamic_opt').minimize(
                 tf.reduce_mean(squared_diff)
             )
             return dyn_next_states, squared_diff, optimizer
 
-    def build_dqn(self, reward):
+    def build_dqn(self, states, actions, reward, next_states):
         """
             Finds loss in Q value between target net
             and evaluation net
         """
         with tf.compat.v1.variable_scope('evaluation_net'):
-            eval_one = tf.layers.dense(self.states,
+            eval_one = tf.layers.dense(states,
                                        units=128,
                                        activation=tf.nn.relu,
                                        name='eval_one')
@@ -98,7 +104,7 @@ class Curiosity:
                                      name='eval_q')
 
         with tf.compat.v1.variable_scope('target_net'):
-            target_one = tf.layers.dense(self.next_states, 128,
+            target_one = tf.layers.dense(next_states, 128,
                                          activation=tf.nn.relu,
                                          name='target_one')
             target_q = tf.layers.dense(target_one,
@@ -110,9 +116,9 @@ class Curiosity:
                 tf.reduce_max(target_q, axis=1, name='q_max_ns')
 
         with tf.compat.v1.variable_scope('q_wrt_a'):
-            act_indices = tf.stack([tf.range(tf.shape(self.actions)[0],
+            act_indices = tf.stack([tf.range(tf.shape(actions)[0],
                                              dtype=tf.int32),
-                                    self.actions],
+                                    actions],
                                    axis=1,
                                    name='stacked_act_indices')
             q_wrt_ac = tf.gather_nd(params=eval_q, indices=act_indices)
@@ -123,8 +129,9 @@ class Curiosity:
             predictions=q_wrt_ac
         )
         opt = tf.train.AdamOptimizer(self.lr).minimize(
-            loss, var_list=tf.get_collection(
-                tf.GraphKeys.TRAINABLE_VARIABLES, scope='evaluation_net')
+            loss, var_list=tf.compat.v1.get_collection(
+                tf.compat.v1.GraphKeys.TRAINABLE_VARIABLES,
+                scope='evaluation_net')
         )
         return eval_q, loss, opt
 
@@ -147,7 +154,7 @@ class Curiosity:
             tf.compat.v1.summary.FileWriter(
                 '/root/tensorboard/curiosity/1', graph=self.sess.graph)
 
-    def chose_action(self, observation):
+    def choose_action(self, observation):
         """
             Returns an action given an observation
         """
@@ -205,3 +212,39 @@ class Curiosity:
             self.sess.run(self.dyn_opt,
                           feed_dict=feed_inputs)
         self.step += 1
+
+    def train(self, env, n_episodes=200, plot=True):
+        """
+           Trains the agent
+        """
+        self.episode_steps = []
+
+        for episode in range(n_episodes):
+            state = env.reset()
+            step = 0
+
+            while True:
+                env.render()
+                action = self.choose_action(state)
+                next_state, reward, done, _ = env.step(action)
+                self.memorize((state, action, reward, next_state))
+                self.learn()
+
+                if done:
+                    print(f'Episode: {episode},  steps: {step}')
+                    self.episode_steps += [step]
+                    break
+                state = next_state
+                step += 1
+        return self.plot()
+
+    def plot(self):
+        """
+            Outputs the steps run for the given episodes
+        """
+        if not hasattr(self, 'episode_steps'):
+            return
+        plt.plot(self.episode_steps)
+        plt.ylabel('steps')
+        plt.xlabel('no. of episodes')
+        plt.show()
